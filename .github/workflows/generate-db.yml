@@ -1,0 +1,39 @@
+name: Generate Database
+
+on:
+    workflow_dispatch:
+
+jobs:
+    generate:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Install uv
+              uses: astral-sh/setup-uv@v5
+
+            - name: Install dependencies
+              run: uv sync
+
+            - name: Process all source files
+              run: |
+                  shopt -s nullglob
+                  files=(sources/*.xlsx)
+                  if [ ${#files[@]} -eq 0 ]; then
+                    echo "No source files found in sources/ — nothing to process."
+                    exit 1
+                  fi
+                  for f in "${files[@]}"; do
+                    filename=$(basename "$f")
+                    echo "Processing $filename..."
+                    uv run main.py update-from-source "$filename"
+                  done
+
+            - name: Upload database artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: playhub-db
+                  path: playhub.db
+                  retention-days: 90

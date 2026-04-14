@@ -16,9 +16,15 @@ import requests
 
 API_BASE = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2"
 HEADERS = {
+    # Prevents some CDN/WAF layers from rejecting headless requests outright.
     "User-Agent": "Mozilla/5.0",
     "Accept": "application/json",
+    # The API serves multiple games; this header selects Disney Lorcana data.
+    # Requests without it return nothing or data for the wrong game.
     "x-game-slug": "disney-lorcana",
+    # The API enforces these server-side (not just as a CORS check) to ensure
+    # requests appear to originate from the official Play Hub frontend.
+    # Omitting them results in 403 responses.
     "Origin": "https://tcg.ravensburgerplay.com",
     "Referer": "https://tcg.ravensburgerplay.com/",
 }

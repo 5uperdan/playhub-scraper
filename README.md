@@ -21,11 +21,24 @@ The [GitHub Pages site](https://5uperdan.github.io/playhub-scraper/) provides a 
 - **Competitions tab** — browse and filter all competitions by name or venue, see player counts and winners
 - **Players tab** — search by name, then click a player to expand their full competition and match history
 
-Since the database is generated locally from your own sources, you need to:
+Since the database is generated from your own sources, you need to produce a `playhub.db` file first, then upload it to the site. There are two ways to do this:
 
-1. Generate your `playhub.db` locally using the CLI commands below
-2. Visit the [site](https://5uperdan.github.io/playhub-scraper/)
-3. Upload your `playhub.db` file via the file picker or drag-and-drop
+**Option A — No Python required (GitHub Actions):**
+
+Forking creates your own copy of this repository under your GitHub account, including all the source files and the automated workflow. You can do this entirely from the GitHub website or mobile app — no terminal needed.
+
+1. Click **Fork** at the top-right of this repository on GitHub (you'll need a free GitHub account)
+2. In your fork, go to **Settings → Actions → General** and ensure Actions are enabled (forks sometimes have them disabled by default)
+3. Go to the **Actions** tab in your fork
+4. Select **Generate Database** in the left-hand list and click **Run workflow → Run workflow**
+5. Wait for the run to complete (usually a few minutes) — a green tick means success
+6. Click into the completed run, scroll to **Artifacts**, and download `playhub-db` — unzip it to get `playhub.db`
+7. Visit the [site](https://5uperdan.github.io/playhub-scraper/), upload the file, and explore
+
+**Option B — Local CLI (requires Python / uv):**
+
+1. Run the CLI commands below to generate `playhub.db`
+2. Visit the [site](https://5uperdan.github.io/playhub-scraper/) and upload the file
 
 All queries run entirely in your browser using SQLite compiled to WebAssembly — nothing is uploaded or sent anywhere.
 
