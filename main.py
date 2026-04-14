@@ -63,6 +63,9 @@ def _get_or_create_venue(session, ph_uuid, name, source_uuid):
         venue = _db.Venue(ph_uuid=ph_uuid, name=name, first_source_uuid=source_uuid)
         session.add(venue)
         session.flush()
+    else:
+        # Update name to the latest value seen, in case the store has been renamed
+        venue.name = name
     return venue
 
 
