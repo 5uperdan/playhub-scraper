@@ -1,31 +1,29 @@
 # playhub-scraper
 
-Scrapes Disney Lorcana Set Championship tournament data from Play Hub and stores it in a queryable SQLite database.
+A tool for collecting and exploring Disney Lorcana Set Championship results from [Play Hub](https://tcg.ravensburgerplay.com). It scrapes match-level data (players, rounds, scores, standings) and stores it in a local database, which you can then explore through a web interface or query via a command-line tool.
+
+**[Open the web interface →](https://5uperdan.github.io/playhub-scraper/)**
 
 ## Vibes
 
 This project was fully vibe coded by Claude with not a single line of code written by myself. Even most of the readme was created by Claude. What a guy, eh?
 
-## What it does
+---
 
-- Downloads Google Sheets containing Play Hub event links
-- Fetches match-level data (players, rounds, scores, results) directly from the Play Hub REST API — no headless browser needed
-- Stores everything in a local SQLite database (`playhub.db`) via SQLAlchemy
-- Exposes a CLI for adding sources, processing data, and querying player history
-- Includes a browser-based web UI for exploring competitions and player histories without the CLI
+## Using the web interface
 
-## Web Interface
+The [web interface](https://5uperdan.github.io/playhub-scraper/) lets you explore competition results and player histories in your browser. It has two tabs:
 
-The [GitHub Pages site](https://5uperdan.github.io/playhub-scraper/) provides a browser-based UI for exploring your data:
+- **Competitions** — browse and filter all competitions by name or venue, see player counts and winners
+- **Players** — search by name, then click a player to expand their full competition and match history
 
-- **Competitions tab** — browse and filter all competitions by name or venue, see player counts and winners
-- **Players tab** — search by name, then click a player to expand their full competition and match history
+All queries run entirely in your browser against your database — no external communication is required and once the page is loaded, queries should work even when you're offline.
 
-Since the database is generated from your own sources, you need to produce a `playhub.db` file first, then upload it to the site. There are two ways to do this:
+To use it, you first need a `playhub.db` database file. There are two ways to get one:
 
-**Option A — No Python required (GitHub Actions):**
+### Option A — No Python required but untested (via GitHub Actions)
 
-Forking creates your own copy of this repository under your GitHub account, including all the source files and the automated workflow. You can do this entirely from the GitHub website or mobile app — no terminal needed.
+Forking creates your own copy of this repository under your GitHub account, including all the source data files and an automated workflow that builds the database for you. You can do this entirely from the GitHub website or mobile app — no terminal needed.
 
 1. Click **Fork** at the top-right of this repository on GitHub (you'll need a free GitHub account)
 2. In your fork, go to **Settings → Actions → General** and ensure Actions are enabled (forks sometimes have them disabled by default)
@@ -33,18 +31,15 @@ Forking creates your own copy of this repository under your GitHub account, incl
 4. Select **Generate Database** in the left-hand list and click **Run workflow → Run workflow**
 5. Wait for the run to complete (usually a few minutes) — a green tick means success
 6. Click into the completed run, scroll to **Artifacts**, and download `playhub-db` — unzip it to get `playhub.db`
-7. Visit the [site](https://5uperdan.github.io/playhub-scraper/), upload the file, and explore
+7. Visit the [web interface](https://5uperdan.github.io/playhub-scraper/), upload the file, and explore
 
-**Option B — Local CLI (requires Python / uv):**
+### Option B — Generate the database locally (requires Python)
 
-1. Run the CLI commands below to generate `playhub.db`
-2. Visit the [site](https://5uperdan.github.io/playhub-scraper/) and upload the file
+If you have Python set up on your machine, follow the CLI instructions below to generate `playhub.db`, then upload it to the [web interface](https://5uperdan.github.io/playhub-scraper/), use the CLI to query your data, or explore it on your own locally run web interface.
 
-All queries run entirely in your browser using SQLite compiled to WebAssembly — nothing is uploaded or sent anywhere.
+### Running the web interface locally
 
-### Running the site locally
-
-You can serve the site from your machine without deploying to GitHub Pages:
+If you'd prefer not to use the hosted GitHub Pages site, you can serve it from your own machine:
 
 ```bash
 python3 -m http.server 8000 --directory docs/
@@ -52,11 +47,15 @@ python3 -m http.server 8000 --directory docs/
 
 Then open [http://localhost:8000](http://localhost:8000) in your browser.
 
-## Requirements
+---
+
+## CLI and advanced usage
+
+The CLI is for adding new data sources (Google Sheets containing Play Hub event links), building and updating the database, and querying it from the terminal.
+
+### Requirements
 
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
-
-## CLI Commands
 
 ### `add-source <google-sheet-url>`
 
@@ -86,7 +85,7 @@ Reads a saved source file from `sources/`, visits every Play Hub event link foun
 uv run main.py update-from-source source_20260414T120000.xlsx
 ```
 
-**Replace mode (`--replace`):** For each competition found in the source, all existing match and standings records are deleted and re-scraped from scratch. Player, venue, and round records are never deleted, so a player's full history is preserved through their UUID.  Use this when you want a clean re-scrape of data you suspect is stale or partial.
+**Replace mode (`--replace`):** For each competition found in the source, all existing match and standings records are deleted and re-scraped from scratch. Player, venue, and round records are never deleted, so a player's full history is preserved through their UUID. Use this when you want a clean re-scrape of data you suspect is stale or partial.
 
 ```bash
 uv run main.py update-from-source source_20260414T120000.xlsx --replace
@@ -101,18 +100,18 @@ uv run main.py update-from-source source_20260414T120000.xlsx --replace
 Queries the database for a player (case-insensitive, partial match) and prints all their competition history, round-by-round match results, and final positions.
 
 ```bash
-uv run main.py player-info "Danny"
+uv run main.py player-info "Mickey"
 ```
 
 Example output:
 ```
-MK_DannyB
-  Black Dragon Games Ltd: 2026-04-05
-    Round 1: ToInfinity_AndBeyond 1 - 2 MK_DannyB
-    Round 2: JoePope27 0 - 2 MK_DannyB
-    Round 3: MK_DannyB 1 - 2 MK_ifoughtthelore
-    Top 4: Bradley 1 - 2 MK_DannyB
-    Top 2: MK_DannyB 0 - 2 OL_Okan
+Mickey
+  The Disney Store: 2026-04-05
+    Round 1: Buzz 1 - 2 Mickey
+    Round 2: Jim 0 - 2 Mickey
+    Round 3: Mickey 1 - 2 Minnie
+    Top 4: Pete 1 - 2 Mickey
+    Top 2: Mickey 0 - 2 Pluto
     Final position: 2
 ```
 
@@ -129,13 +128,15 @@ uv run main.py list-competitions --name "Element Games"
 
 Example output:
 ```
-2026-04-05  Black Dragon Games Ltd  —  Winterspell Championship
-  Winner: OL_Okan  (34 players)
-2026-04-05  Element Games  —  Winterspell Set Championship - Element Games
-  Winner: Kravex  (15 players)
+2026-04-05  The Disney Store  —  Winterspell Championship
+  Winner: Pluto  (34 players)
+2026-04-05  UKGE  —  A Set Championship
+  Winner: Woody  (15 players)
 ```
 
 ---
+
+### Database schema
 
 | Table | Key columns |
 |---|---|
@@ -147,7 +148,7 @@ Example output:
 | `matches` | `uuid` (PK), `player_a_uuid` (FK), `player_b_uuid` (FK), `player_a_score`, `player_b_score`, `winning_player_uuid` (FK, NULL = draw), `competition_uuid` (FK), `round_uuid` (FK) |
 | `competition_results` | `competition_uuid` + `player_uuid` (composite PK), `position` |
 
-## A note on player names
+### A note on player names
 
 Player display names on Play Hub can be changed by the user at any time. The database uses the Play Hub internal user ID (`ph_user_id`) as the stable key for deduplication — so the same player is always one record regardless of name changes, and all their historical matches continue to reference the same UUID.
 
