@@ -148,9 +148,11 @@ Example output:
 | `matches` | `uuid` (PK), `player_a_uuid` (FK), `player_b_uuid` (FK), `player_a_score`, `player_b_score`, `winning_player_uuid` (FK, NULL = draw), `competition_uuid` (FK), `round_uuid` (FK) |
 | `competition_results` | `competition_uuid` + `player_uuid` (composite PK), `position` |
 
-### A note on player names
+### A note on player and venue names
 
 Player display names on Play Hub can be changed by the user at any time. The database uses the Play Hub internal user ID (`ph_user_id`) as the stable key for deduplication — so the same player is always one record regardless of name changes, and all their historical matches continue to reference the same UUID.
 
-Every run of `update-from-source` (in either mode) updates the stored name to the latest value seen for each player. This means a player's current display name is always shown, even for their older matches. There is currently no mechanism to preserve a full name-change history (nor any interest in doing so).
+Similarly, store/venue names can change. Venues are keyed by their Play Hub store UUID, not their name, so a renamed venue remains a single record with all its historical competitions intact.
+
+Every run of `update-from-source` (in either mode) updates the stored name to the latest value seen for each player and venue. This means current display names are always shown, even for older records. There is currently no mechanism to preserve a full name-change history (nor any interest in doing so).
 
