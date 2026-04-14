@@ -10,7 +10,7 @@ from lxml import html as lhtml
 SHEET_ID = "1ozBDV9SERmCBBvzmQyZfilclgJwWmA48"
 XLSX_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=xlsx"
 OUTPUT_FILE = "results.csv"
-PLAYER_XPATH = "/html/body/div[3]/main/div[2]/div/div/div/div[1]/div/div[1]/div[2]/div/div[3]/div[2]"
+PLAYER_XPATH = "//div[@data-testid='available-spots']"
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
@@ -103,8 +103,9 @@ def get_player_count(url):
             if count is not None:
                 return count
 
-        # --- Fallback: search page text for "N players" or "N/M players" ---
-        match = re.search(r"(\d+)(?:/\d+)?\s+players", response.text, re.IGNORECASE)
+        # --- Fallback: embedded JSON field in the page source ---
+        # "starting_player_count" is part of structured event data, not description text.
+        match = re.search(r'"starting_player_count"\s*:\s*(\d+)', response.text)
         if match:
             return int(match.group(1))
 
