@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PlayHub Stats</title>
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f1f5f9;
+            color: #1e293b;
+            min-height: 100vh;
+        }
+
+        code {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.875em;
+            background: #f1f5f9;
+            padding: 0.1em 0.35em;
+            border-radius: 3px;
+        }
+
+        /* ── Upload screen ── */
+        #upload-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 2rem;
+            gap: 2rem;
+        }
+
+        .hero {
+            text-align: center;
+        }
+
+        .hero h1 {
+            font-size: 2rem;
+            font-weight: 700;
+        }
+
+        .hero p {
+            color: #64748b;
+            margin-top: 0.5rem;
+            max-width: 44ch;
+            line-height: 1.6;
+        }
+
+        #drop-zone {
+            border: 2px dashed #94a3b8;
+            border-radius: 12px;
+            padding: 3rem 4rem;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            background: #fff;
+            max-width: 420px;
+            width: 100%;
+        }
+
+        #drop-zone:hover,
+        #drop-zone.drag-over {
+            border-color: #2563eb;
+            background: #eff6ff;
+        }
+
+        #drop-zone .dz-icon {
+            font-size: 2.5rem;
+            margin-bottom: 0.75rem;
+        }
+
+        #drop-zone p {
+            color: #475569;
+            line-height: 1.6;
+        }
+
+        #drop-zone strong {
+            color: #2563eb;
+        }
+
+        #drop-zone input {
+            display: none;
+        }
+
+        .upload-hint {
+            color: #94a3b8;
+            font-size: 0.8rem;
+            text-align: center;
+        }
+
+        .error-msg {
+            color: #dc2626;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 6px;
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+        }
+
+        /* ── App shell ── */
+        #app {
+            display: none;
+        }
+
+        header {
+            background: #1e293b;
+            color: #fff;
+            padding: 0 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            height: 52px;
+        }
+
+        header h1 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            flex: 1;
+        }
+
+        #change-db-btn {
+            background: transparent;
+            border: 1px solid #475569;
+            color: #94a3b8;
+            border-radius: 6px;
+            padding: 0.25rem 0.75rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: border-color 0.15s, color 0.15s;
+        }
+
+        #change-db-btn:hover {
+            border-color: #94a3b8;
+            color: #e2e8f0;
+        }
+
+        /* ── Tabs ── */
+        .tabs {
+            background: #fff;
+            border-bottom: 1px solid #e2e8f0;
+            padding: 0 1.5rem;
+            display: flex;
+        }
+
+        .tab-btn {
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            padding: 0.75rem 1.25rem;
+            font-size: 0.9375rem;
+            font: inherit;
+            color: #64748b;
+            cursor: pointer;
+            transition: color 0.15s, border-color 0.15s;
+            margin-bottom: -1px;
+        }
+
+        .tab-btn.active {
+            color: #2563eb;
+            border-bottom-color: #2563eb;
+            font-weight: 600;
+        }
+
+        .tab-btn:hover:not(.active) {
+            color: #1e293b;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 1.5rem;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* ── Controls row ── */
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .controls input {
+            flex: 1;
+            max-width: 360px;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            font: inherit;
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        .controls input:focus {
+            border-color: #2563eb;
+        }
+
+        .count-label {
+            color: #94a3b8;
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+
+        /* ── Table ── */
+        .table-wrap {
+            overflow-x: auto;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            background: #fff;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        thead th {
+            background: #f8fafc;
+            text-align: left;
+            padding: 0.625rem 0.875rem;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid #e2e8f0;
+            white-space: nowrap;
+        }
+
+        tbody td {
+            padding: 0.625rem 0.875rem;
+            border-bottom: 1px solid #f1f5f9;
+            vertical-align: middle;
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        tbody tr:hover td {
+            background: #f8fafc;
+        }
+
+        /* ── Player cards ── */
+        .player-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .player-card {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .player-card-header {
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            user-select: none;
+            transition: background 0.15s;
+        }
+
+        .player-card-header:hover {
+            background: #f8fafc;
+        }
+
+        .player-name {
+            font-weight: 600;
+        }
+
+        .chevron {
+            color: #94a3b8;
+            font-size: 0.75rem;
+            transition: transform 0.2s;
+        }
+
+        .player-card.open .chevron {
+            transform: rotate(180deg);
+        }
+
+        .player-card-body {
+            display: none;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .player-card.open .player-card-body {
+            display: block;
+        }
+
+        /* ── Competition sections inside player card ── */
+        .comp-section {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        .comp-section:last-child {
+            border-bottom: none;
+        }
+
+        .comp-section-title {
+            font-weight: 600;
+            font-size: 0.9375rem;
+            margin-bottom: 0.2rem;
+        }
+
+        .comp-section-meta {
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-bottom: 0.75rem;
+        }
+
+        .nested-table-wrap {
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+            overflow: hidden;
+        }
+
+        /* ── Badges ── */
+        .badge {
+            display: inline-block;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 0.15rem 0.45rem;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .win {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .loss {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .draw {
+            background: #f1f5f9;
+            color: #475569;
+        }
+
+        /* ── States ── */
+        .empty {
+            color: #94a3b8;
+            font-style: italic;
+            padding: 2rem;
+            text-align: center;
+        }
+
+        .muted {
+            color: #94a3b8;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- ═══════════════════════════════════════════════════════════
+     UPLOAD SCREEN
+════════════════════════════════════════════════════════════ -->
+    <div id="upload-screen">
+        <div class="hero">
+            <h1>🎴 PlayHub Stats</h1>
+            <p>
+                Upload your local <code>playhub.db</code> file to explore competition results and player match
+                histories.
+                All queries run entirely in your browser — nothing is sent anywhere.
+            </p>
+        </div>
+
+        <div id="drop-zone">
+            <div class="dz-icon">🗄️</div>
+            <p><strong>Click to browse</strong> or drag &amp; drop<br>your <code>playhub.db</code> file here</p>
+            <input type="file" id="file-input" accept=".db">
+        </div>
+
+        <p class="upload-hint">Generate <code>playhub.db</code> locally with the PlayHub Scraper CLI, then upload it
+            here.</p>
+        <div id="upload-error" class="error-msg" style="display:none"></div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+     APP
+════════════════════════════════════════════════════════════ -->
+    <div id="app">
+        <header>
+            <h1>🎴 PlayHub Stats</h1>
+            <button id="change-db-btn">Change database</button>
+        </header>
+
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="competitions">Competitions</button>
+            <button class="tab-btn" data-tab="players">Players</button>
+        </div>
+
+        <!-- Competitions tab -->
+        <div id="tab-competitions" class="tab-content active">
+            <div class="controls">
+                <input id="comp-filter" type="text" placeholder="Filter by name or venue…" autocomplete="off">
+                <span id="comp-count" class="count-label"></span>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Competition</th>
+                            <th>Venue</th>
+                            <th style="text-align:right">Players</th>
+                            <th>Winner</th>
+                        </tr>
+                    </thead>
+                    <tbody id="comp-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Players tab -->
+        <div id="tab-players" class="tab-content">
+            <div class="controls">
+                <input id="player-filter" type="text" placeholder="Search player name…" autocomplete="off">
+                <span id="player-count" class="count-label"></span>
+            </div>
+            <div id="player-list" class="player-list"></div>
+        </div>
+    </div>
+
+    <!-- sql.js: SQLite compiled to WebAssembly, runs entirely in-browser -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
+    <script>
+        // ═══════════════════════════════════════════════════════════
+        //  sql.js bootstrap
+        // ═══════════════════════════════════════════════════════════
+        let SQL = null;
+        let db = null;
+
+        initSqlJs({
+            // Point at the CDN for the companion WASM binary
+            locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${f}`
+        }).then(sql => {
+            SQL = sql;
+        }).catch(() => {
+            showError('Failed to load sql.js. Check your internet connection and refresh.');
+        });
+
+        // ═══════════════════════════════════════════════════════════
+        //  Query helper — returns array of plain objects
+        // ═══════════════════════════════════════════════════════════
+        function query(sql, params = []) {
+            const result = db.exec(sql, params);
+            if (!result.length) return [];
+            const { columns, values } = result[0];
+            return values.map(row =>
+                Object.fromEntries(columns.map((col, i) => [col, row[i]]))
+            );
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  Database loading
+        // ═══════════════════════════════════════════════════════════
+        function loadDatabase(file) {
+            if (!file) return;
+            if (!SQL) { showError('sql.js is still loading — please try again in a moment.'); return; }
+
+            const reader = new FileReader();
+            reader.onload = e => {
+                try {
+                    const bytes = new Uint8Array(e.target.result);
+                    if (db) db.close();
+                    db = new SQL.Database(bytes);
+                    // Sanity-check: must have a competitions table
+                    const tables = query(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name='competitions'"
+                    );
+                    if (!tables.length) throw new Error('Not a playhub.db file');
+                    showApp();
+                } catch (err) {
+                    showError('Could not open this file. Make sure it is a valid playhub.db generated by the CLI.');
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function showApp() {
+            document.getElementById('upload-error').style.display = 'none';
+            document.getElementById('upload-screen').style.display = 'none';
+            document.getElementById('app').style.display = 'block';
+            renderCompetitions();
+        }
+
+        function showUploadScreen() {
+            if (db) { db.close(); db = null; }
+            document.getElementById('file-input').value = '';
+            document.getElementById('upload-error').style.display = 'none';
+            document.getElementById('app').style.display = 'none';
+            document.getElementById('upload-screen').style.display = '';
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('upload-error');
+            el.textContent = msg;
+            el.style.display = '';
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  File picker events (click + drag-and-drop)
+        // ═══════════════════════════════════════════════════════════
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+
+        dropZone.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', e => loadDatabase(e.target.files[0]));
+
+        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+        dropZone.addEventListener('drop', e => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            const file = e.dataTransfer.files[0];
+            if (file) loadDatabase(file);
+        });
+
+        document.getElementById('change-db-btn').addEventListener('click', showUploadScreen);
+
+        // ═══════════════════════════════════════════════════════════
+        //  Tab switching
+        // ═══════════════════════════════════════════════════════════
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tab = btn.dataset.tab;
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+                document.querySelectorAll('.tab-content').forEach(c => {
+                    c.classList.toggle('active', c.id === `tab-${tab}`);
+                });
+                if (tab === 'competitions') renderCompetitions();
+                if (tab === 'players') renderPlayers();
+            });
+        });
+
+        // ═══════════════════════════════════════════════════════════
+        //  Competitions tab
+        // ═══════════════════════════════════════════════════════════
+        let compFilter = '';
+        const compFilterInput = document.getElementById('comp-filter');
+
+        compFilterInput.addEventListener('input', () => {
+            compFilter = compFilterInput.value.trim();
+            renderCompetitions();
+        });
+
+        function renderCompetitions() {
+            const pattern = `%${compFilter.toLowerCase()}%`;
+
+            // Subquery for winner avoids fan-out if multiple players share position 1
+            const rows = query(`
+    SELECT
+      c.uuid,
+      c.name,
+      c.start_date,
+      c.attended_player_count,
+      v.name AS venue_name,
+      (
+        SELECT p.name
+        FROM competition_results cr
+        JOIN players p ON p.uuid = cr.player_uuid
+        WHERE cr.competition_uuid = c.uuid AND cr.position = 1
+        LIMIT 1
+      ) AS winner_name
+    FROM competitions c
+    LEFT JOIN venues v ON c.venue_uuid = v.ph_uuid
+    WHERE LOWER(c.name) LIKE ? OR LOWER(COALESCE(v.name, '')) LIKE ?
+    ORDER BY c.start_date ASC, c.name ASC
+  `, [pattern, pattern]);
+
+            const tbody = document.getElementById('comp-tbody');
+            const countEl = document.getElementById('comp-count');
+
+            if (!rows.length) {
+                tbody.innerHTML = `<tr><td colspan="5" class="empty">No competitions found</td></tr>`;
+                countEl.textContent = '';
+                return;
+            }
+
+            countEl.textContent = `${rows.length} result${rows.length !== 1 ? 's' : ''}`;
+            tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td class="muted" style="white-space:nowrap">${esc(r.start_date) || '—'}</td>
+      <td>${esc(r.name)}</td>
+      <td>${esc(r.venue_name) || '<span class="muted">—</span>'}</td>
+      <td style="text-align:right">${r.attended_player_count ?? '<span class="muted">—</span>'}</td>
+      <td>${esc(r.winner_name) || '<span class="muted">—</span>'}</td>
+    </tr>
+  `).join('');
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  Players tab
+        // ═══════════════════════════════════════════════════════════
+        let playerFilter = '';
+        const playerFilterInput = document.getElementById('player-filter');
+
+        playerFilterInput.addEventListener('input', () => {
+            playerFilter = playerFilterInput.value.trim();
+            renderPlayers();
+        });
+
+        function renderPlayers() {
+            const list = document.getElementById('player-list');
+            const countEl = document.getElementById('player-count');
+
+            if (playerFilter.length < 2) {
+                list.innerHTML = `<div class="empty">Type at least 2 characters to search</div>`;
+                countEl.textContent = '';
+                return;
+            }
+
+            const pattern = `%${playerFilter.toLowerCase()}%`;
+            const rows = query(
+                `SELECT uuid, name FROM players WHERE LOWER(name) LIKE ? ORDER BY name`,
+                [pattern]
+            );
+
+            if (!rows.length) {
+                list.innerHTML = `<div class="empty">No players found</div>`;
+                countEl.textContent = '';
+                return;
+            }
+
+            countEl.textContent = `${rows.length} result${rows.length !== 1 ? 's' : ''}`;
+            list.innerHTML = rows.map(r => `
+    <div class="player-card" data-uuid="${esc(r.uuid)}">
+      <div class="player-card-header" onclick="togglePlayer(this)">
+        <span class="player-name">${esc(r.name)}</span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="player-card-body" id="pbody-${esc(r.uuid)}">
+        <div class="empty">Loading…</div>
+      </div>
+    </div>
+  `).join('');
+        }
+
+        function togglePlayer(header) {
+            const card = header.closest('.player-card');
+            const isOpen = card.classList.toggle('open');
+            if (isOpen) renderPlayerDetail(card.dataset.uuid);
+        }
+
+        function renderPlayerDetail(playerUuid) {
+            const bodyEl = document.getElementById(`pbody-${playerUuid}`);
+
+            // All competitions this player entered, ordered by date
+            const competitions = query(`
+    SELECT
+      c.uuid,
+      c.name,
+      c.start_date,
+      v.name AS venue_name,
+      cr.position
+    FROM competition_results cr
+    JOIN competitions c ON c.uuid = cr.competition_uuid
+    LEFT JOIN venues v ON c.venue_uuid = v.ph_uuid
+    WHERE cr.player_uuid = ?
+    ORDER BY c.start_date ASC
+  `, [playerUuid]);
+
+            if (!competitions.length) {
+                bodyEl.innerHTML = `<div class="empty">No competition history</div>`;
+                return;
+            }
+
+            const sections = competitions.map(comp => {
+                // All matches for this player in this competition
+                const matches = query(`
+      SELECT
+        m.player_a_uuid,
+        m.player_b_uuid,
+        m.player_a_score,
+        m.player_b_score,
+        m.winning_player_uuid,
+        r.name  AS round_name,
+        pa.name AS player_a_name,
+        pb.name AS player_b_name
+      FROM matches m
+      JOIN rounds  r  ON r.uuid  = m.round_uuid
+      JOIN players pa ON pa.uuid = m.player_a_uuid
+      JOIN players pb ON pb.uuid = m.player_b_uuid
+      WHERE m.competition_uuid = ?
+        AND (m.player_a_uuid = ? OR m.player_b_uuid = ?)
+    `, [comp.uuid, playerUuid, playerUuid]);
+
+                // Sort: Swiss rounds ascending, then elimination rounds (Top 8 → Top 4 → Top 2)
+                matches.sort((a, b) => compareRounds(a.round_name, b.round_name));
+
+                const posText = comp.position != null ? ` · Finished: ${ordinal(comp.position)}` : '';
+                const meta = [
+                    comp.start_date,
+                    comp.venue_name,
+                ].filter(Boolean).join(' · ') + posText;
+
+                const matchRows = matches.map(m => {
+                    const isA = m.player_a_uuid === playerUuid;
+                    const myScore = isA ? m.player_a_score : m.player_b_score;
+                    const oppScore = isA ? m.player_b_score : m.player_a_score;
+                    const oppName = isA ? m.player_b_name : m.player_a_name;
+
+                    let result, cls;
+                    if (m.winning_player_uuid === null) {
+                        result = 'Draw'; cls = 'draw';
+                    } else if (m.winning_player_uuid === playerUuid) {
+                        result = 'Win'; cls = 'win';
+                    } else {
+                        result = 'Loss'; cls = 'loss';
+                    }
+
+                    return `
+        <tr>
+          <td style="white-space:nowrap">${esc(m.round_name)}</td>
+          <td>${esc(oppName)}</td>
+          <td style="text-align:center;white-space:nowrap">${myScore ?? '—'} – ${oppScore ?? '—'}</td>
+          <td><span class="badge ${cls}">${result}</span></td>
+        </tr>`;
+                }).join('');
+
+                const matchTable = matches.length
+                    ? `<div class="nested-table-wrap">
+           <table>
+             <thead>
+               <tr>
+                 <th>Round</th>
+                 <th>Opponent</th>
+                 <th style="text-align:center">Score</th>
+                 <th>Result</th>
+               </tr>
+             </thead>
+             <tbody>${matchRows}</tbody>
+           </table>
+         </div>`
+                    : `<div class="empty" style="padding:0.5rem 0;text-align:left">No match records</div>`;
+
+                return `
+      <div class="comp-section">
+        <div class="comp-section-title">${esc(comp.name)}</div>
+        <div class="comp-section-meta">${esc(meta)}</div>
+        ${matchTable}
+      </div>`;
+            });
+
+            bodyEl.innerHTML = sections.join('');
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  Round sort helpers
+        // ═══════════════════════════════════════════════════════════
+        function roundSortKey(name) {
+            const swiss = name.match(/^Round (\d+)$/);
+            if (swiss) return [0, parseInt(swiss[1], 10)];
+
+            const elim = name.match(/^Top (\d+)$/);
+            // Negate so Top 8 (key -8) sorts before Top 4 (key -4) ascending
+            if (elim) return [1, -parseInt(elim[1], 10)];
+
+            return [2, 0];
+        }
+
+        function compareRounds(a, b) {
+            const [at, an] = roundSortKey(a);
+            const [bt, bn] = roundSortKey(b);
+            return at !== bt ? at - bt : an - bn;
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  Utilities
+        // ═══════════════════════════════════════════════════════════
+        function esc(str) {
+            if (str == null) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function ordinal(n) {
+            const s = ['th', 'st', 'nd', 'rd'];
+            const v = n % 100;
+            return n + (s[(v - 20) % 10] || s[v] || s[0]);
+        }
+    </script>
+</body>
+
+</html>

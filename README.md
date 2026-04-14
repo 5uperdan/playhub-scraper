@@ -12,6 +12,32 @@ This project was fully vibe coded by Claude with not a single line of code writt
 - Fetches match-level data (players, rounds, scores, results) directly from the Play Hub REST API — no headless browser needed
 - Stores everything in a local SQLite database (`playhub.db`) via SQLAlchemy
 - Exposes a CLI for adding sources, processing data, and querying player history
+- Includes a browser-based web UI for exploring competitions and player histories without the CLI
+
+## Web Interface
+
+The [GitHub Pages site](https://5uperdan.github.io/playhub-scraper/) provides a browser-based UI for exploring your data:
+
+- **Competitions tab** — browse and filter all competitions by name or venue, see player counts and winners
+- **Players tab** — search by name, then click a player to expand their full competition and match history
+
+Since the database is generated locally from your own sources, you need to:
+
+1. Generate your `playhub.db` locally using the CLI commands below
+2. Visit the [site](https://5uperdan.github.io/playhub-scraper/)
+3. Upload your `playhub.db` file via the file picker or drag-and-drop
+
+All queries run entirely in your browser using SQLite compiled to WebAssembly — nothing is uploaded or sent anywhere.
+
+### Running the site locally
+
+You can serve the site from your machine without deploying to GitHub Pages:
+
+```bash
+python3 -m http.server 8000 --directory docs/
+```
+
+Then open [http://localhost:8000](http://localhost:8000) in your browser.
 
 ## Requirements
 
@@ -112,5 +138,5 @@ Example output:
 
 Player display names on Play Hub can be changed by the user at any time. The database uses the Play Hub internal user ID (`ph_user_id`) as the stable key for deduplication — so the same player is always one record regardless of name changes, and all their historical matches continue to reference the same UUID.
 
-Every run of `update-from-source` (in either mode) updates the stored name to the latest value seen for each player. This means a player's current display name is always shown, even for their older matches. There is currently no mechanism to preserve a full name-change history.
+Every run of `update-from-source` (in either mode) updates the stored name to the latest value seen for each player. This means a player's current display name is always shown, even for their older matches. There is currently no mechanism to preserve a full name-change history (nor any interest in doing so).
 
