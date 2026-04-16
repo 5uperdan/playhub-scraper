@@ -285,3 +285,6 @@ Similarly, store/venue names can change. Venues are keyed by their Play Hub stor
 
 Every run of `update-from-source` (in either mode) updates the stored name to the latest value seen for each player and venue. This means current display names are always shown, even for older records. There is currently no mechanism to preserve a full name-change history (nor any interest in doing so).
 
+### Byes
+
+Totally skipped at the moment, not even stored as results. Haven't decided the best way to handle them.
