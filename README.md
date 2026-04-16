@@ -117,6 +117,20 @@ Mickey
 
 ---
 
+### `tournament-report --url <playhub-url>`
+
+Fetches the list of registered players for a tournament directly from the Play Hub API, then looks each player up in the local database and prints their full competition history — one player at a time, separated by blank lines.
+
+This works for upcoming tournaments as well as past ones: only the registration list is fetched from the API, not match data.
+
+```bash
+uv run main.py tournament-report --url "https://tcg.ravensburgerplay.com/events/12345"
+```
+
+Players who have no history in the local database are listed by name with a `(not found in database)` note.
+
+---
+
 ### `list-competitions [--name <filter>]`
 
 Lists all processed competitions sorted by date, showing the venue, competition name, winner, and player count. Optionally filter by competition or venue name (case-insensitive, partial match).

@@ -324,6 +324,78 @@ def update_from_source(source_file, replace):
 
 
 # ---------------------------------------------------------------------------
+# Display helper
+# ---------------------------------------------------------------------------
+
+
+def _round_sort_key(match):
+    import re as _re
+
+    name = match.round.name if match.round else ""
+    swiss = _re.match(r"Round (\d+)", name)
+    top = _re.match(r"Top (\d+)", name)
+    if swiss:
+        return (0, int(swiss.group(1)))
+    if top:
+        # Top 8 comes before Top 4, so invert
+        return (1, -int(top.group(1)))
+    return (2, 0)
+
+
+def _print_player_info(session, player):
+    """Print a player's competition history to stdout."""
+    click.echo(player.name)
+
+    results = session.query(_db.CompetitionResult).filter_by(player_uuid=player.uuid).all()
+
+    if not results:
+        click.echo("  (no competition results recorded)")
+        click.echo("")
+        return
+
+    comps = sorted(
+        [r.competition for r in results],
+        key=lambda c: c.start_date,
+    )
+
+    for comp in comps:
+        venue_name = comp.venue.name if comp.venue else "Unknown Venue"
+        player_count = f" ({comp.attended_player_count} players)" if comp.attended_player_count else ""
+        click.echo(f"  {venue_name}: {comp.start_date}{player_count}")
+
+        matches = (
+            session.query(_db.Match)
+            .filter(
+                _db.Match.competition_uuid == comp.uuid,
+                ((_db.Match.player_a_uuid == player.uuid) | (_db.Match.player_b_uuid == player.uuid)),
+            )
+            .all()
+        )
+
+        matches = sorted(matches, key=_round_sort_key)
+
+        for match in matches:
+            round_name = match.round.name if match.round else "Unknown Round"
+            pa_name = match.player_a.name
+            pb_name = match.player_b.name
+            pa_score = match.player_a_score
+            pb_score = match.player_b_score
+
+            if match.winning_player_uuid is None:
+                line = f"{pa_name} TIE {pb_name}"
+            else:
+                line = f"{pa_name} {pa_score} - {pb_score} {pb_name}"
+
+            click.echo(f"    {round_name}: {line}")
+
+        comp_result = next((r for r in results if r.competition_uuid == comp.uuid), None)
+        if comp_result and comp_result.position is not None:
+            click.echo(f"    Final position: {comp_result.position}")
+
+    click.echo("")
+
+
+# ---------------------------------------------------------------------------
 # Command: player-info
 # ---------------------------------------------------------------------------
 
@@ -355,74 +427,78 @@ def player_info(player_name):
             return
 
         for player in players:
-            click.echo(player.name)
+            _print_player_info(session, player)
 
-            # Get all competitions this player participated in, ordered by date
-            results = session.query(_db.CompetitionResult).filter_by(player_uuid=player.uuid).all()
 
-            if not results:
-                click.echo("  (no competition results recorded)")
+# ---------------------------------------------------------------------------
+# Command: tournament-report
+# ---------------------------------------------------------------------------
+
+
+@cli.command("tournament-report")
+@click.option(
+    "--url",
+    required=True,
+    help="Play Hub tournament URL, e.g. https://tcg.ravensburgerplay.com/events/12345",
+)
+def tournament_report(url):
+    """Print a history report for every player registered in a tournament.
+
+    Fetches the attendance list for the given tournament from the Play Hub API,
+    then looks up each player in the local database and prints their full
+    competition history. Players not yet in the database are noted.
+
+    The tournament may be upcoming — only the registration list is fetched,
+    not match data.
+
+    \b
+    Example:
+      uv run main.py tournament-report --url "https://tcg.ravensburgerplay.com/events/12345"
+    """
+    event_id = _scrape.get_event_id_from_url(url)
+    if event_id is None:
+        click.echo(f"Could not extract an event ID from: {url}", err=True)
+        sys.exit(1)
+
+    click.echo(f"Fetching registrations for event {event_id}…")
+    try:
+        registrations = _scrape.fetch_all_registrations(event_id)
+    except Exception as e:
+        click.echo(f"Error fetching registrations: {e}", err=True)
+        sys.exit(1)
+
+    if not registrations:
+        click.echo("No registrations found for this event.")
+        return
+
+    # Build ordered list of (ph_user_id, display_name) from registrations
+    players_to_lookup = []
+    for reg in registrations:
+        user = reg.get("user") or {}
+        ph_uid = user.get("id")
+        name = reg.get("best_identifier") or user.get("best_identifier") or "Unknown"
+        players_to_lookup.append((ph_uid, name))
+
+    click.echo(f"Found {len(players_to_lookup)} registered players.\n")
+
+    engine = _db.init_db()
+    Session = _db.make_session_factory(engine)
+
+    with Session() as session:
+        for ph_uid, reg_name in players_to_lookup:
+            # Prefer lookup by Play Hub user ID for accuracy; fall back to name
+            player = None
+            if ph_uid is not None:
+                player = session.query(_db.Player).filter_by(ph_user_id=ph_uid).first()
+            if player is None:
+                player = session.query(_db.Player).filter(_db.Player.name.ilike(reg_name)).first()
+
+            if player is None:
+                click.echo(reg_name)
+                click.echo("  (not found in database)\n")
                 continue
 
-            comps = sorted(
-                [r.competition for r in results],
-                key=lambda c: c.start_date,
-            )
-
-            for comp in comps:
-                venue_name = comp.venue.name if comp.venue else "Unknown Venue"
-                click.echo(f"  {venue_name}: {comp.start_date}")
-
-                # Get matches in this competition, ordered by round
-                matches = (
-                    session.query(_db.Match)
-                    .filter(
-                        _db.Match.competition_uuid == comp.uuid,
-                        ((_db.Match.player_a_uuid == player.uuid) | (_db.Match.player_b_uuid == player.uuid)),
-                    )
-                    .all()
-                )
-
-                # Load rounds and sort by round_number via name heuristic
-                def _round_sort_key(match):
-                    name = match.round.name if match.round else ""
-                    # "Round N" sorts before "Top N" (elimination)
-                    import re as _re
-
-                    swiss = _re.match(r"Round (\d+)", name)
-                    top = _re.match(r"Top (\d+)", name)
-                    if swiss:
-                        return (0, int(swiss.group(1)))
-                    if top:
-                        # Top 8 comes before Top 4, so invert
-                        return (1, -int(top.group(1)))
-                    return (2, 0)
-
-                matches = sorted(matches, key=_round_sort_key)
-
-                for match in matches:
-                    round_name = match.round.name if match.round else "Unknown Round"
-                    pa_name = match.player_a.name
-                    pb_name = match.player_b.name
-                    pa_score = match.player_a_score
-                    pb_score = match.player_b_score
-
-                    if match.winning_player_uuid is None:
-                        # Draw
-                        if match.player_a_uuid == player.uuid:
-                            line = f"{pa_name} TIE {pb_name}"
-                        else:
-                            line = f"{pa_name} TIE {pb_name}"
-                    else:
-                        line = f"{pa_name} {pa_score} - {pb_score} {pb_name}"
-
-                    click.echo(f"    {round_name}: {line}")
-
-                comp_result = next((r for r in results if r.competition_uuid == comp.uuid), None)
-                if comp_result and comp_result.position is not None:
-                    click.echo(f"    Final position: {comp_result.position}")
-
-            click.echo("")
+            _print_player_info(session, player)
 
 
 # ---------------------------------------------------------------------------
