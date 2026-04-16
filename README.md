@@ -12,10 +12,11 @@ This project was fully vibe coded by Claude with not a single line of code writt
 
 ## Using the web interface
 
-The [web interface](https://5uperdan.github.io/playhub-scraper/) lets you explore competition results and player histories in your browser. It has two tabs:
+The [web interface](https://5uperdan.github.io/playhub-scraper/) lets you explore competition results and player histories in your browser. It has three tabs:
 
 - **Competitions** — browse and filter all competitions by name or venue, see player counts and winners
 - **Players** — search by name, then click a player to expand their full competition and match history
+- **Leaderboard** — browse the Elo rating leaderboard for all players, filterable by name
 
 All queries run entirely in your browser against your database — no external communication is required and once the page is loaded, queries should work even when you're offline.
 
@@ -97,7 +98,7 @@ uv run main.py update-from-source source_20260414T120000.xlsx --replace
 
 ### `player-info <player-name>`
 
-Queries the database for a player (case-insensitive, partial match) and prints all their competition history, round-by-round match results, and final positions.
+Queries the database for a player (case-insensitive, partial match) and prints all their competition history, round-by-round match results, and final positions. If Elo ratings have been calculated, the player's rating and leaderboard rank are shown in the header.
 
 ```bash
 uv run main.py player-info "Mickey"
@@ -105,8 +106,8 @@ uv run main.py player-info "Mickey"
 
 Example output:
 ```
-Mickey
-  The Disney Store: 2026-04-05
+Mickey [Elo: 1104.37 | 3rd of 312 | 14 matches]
+  The Disney Store: 2026-04-05 (34 players)
     Round 1: Buzz 1 - 2 Mickey
     Round 2: Jim 0 - 2 Mickey
     Round 3: Mickey 1 - 2 Minnie
@@ -127,7 +128,61 @@ This works for upcoming tournaments as well as past ones: only the registration 
 uv run main.py tournament-report --url "https://tcg.ravensburgerplay.com/events/12345"
 ```
 
-Players who have no history in the local database are listed by name with a `(not found in database)` note.
+Players who have no history in the local database are listed by name with a `(not found in database)` note. If Elo ratings have been calculated, each player's rating and rank will appear in their header line.
+
+---
+
+### `update-ratings`
+
+Computes Elo ratings for all players from scratch and stores them in the database. Always run this after importing new data with `update-from-source` — a reminder will appear in the output of that command whenever new competition data was added.
+
+```bash
+uv run main.py update-ratings
+```
+
+Ratings are **always recalculated from scratch** across the full match history. There is no incremental update — this ensures results are always deterministic and consistent regardless of which order sources were imported. After running, the top 10 leaderboard is printed automatically.
+
+---
+
+### `player-ratings [--top <n>]`
+
+Prints the Elo rating leaderboard, sorted from highest to lowest. Defaults to 25 players; use `--top` to change this.
+
+```bash
+uv run main.py player-ratings
+uv run main.py player-ratings --top 50
+```
+
+Example output:
+```
+Elo Leaderboard — top 25 of 312 rated players
+
+    1. Pluto                           1223.41  (18 matches)
+    2. Minnie                          1187.05  (22 matches)
+    3. Mickey                          1104.37  (14 matches)
+```
+
+The **Swiss matches** column is a reliability indicator — the more Swiss matches a player has played, the more their rating reflects real performance. Treat ratings for players with only a handful of matches with caution.
+
+---
+
+### `predict-match --player1 <name> --player2 <name>`
+
+Estimates win probability for a hypothetical head-to-head match based on stored Elo ratings.
+
+```bash
+uv run main.py predict-match --player1 "Mickey" --player2 "Pluto"
+```
+
+Example output:
+```
+  Mickey vs Pluto
+
+  Mickey                         Elo: 1104.37  Win probability: 36.2%
+  Pluto                          Elo: 1223.41  Win probability: 63.8%
+```
+
+A warning is shown if either player has fewer than 5 Swiss matches, as their rating may not be reliable yet. Players not found in the rating table are assumed to be at the starting rating of 1000.
 
 ---
 
@@ -161,6 +216,66 @@ Example output:
 | `competitions` | `uuid` (PK), `ph_event_id`, `name`, `venue_uuid` (FK), `start_date`, `attended_player_count` |
 | `matches` | `uuid` (PK), `player_a_uuid` (FK), `player_b_uuid` (FK), `player_a_score`, `player_b_score`, `winning_player_uuid` (FK, NULL = draw), `competition_uuid` (FK), `round_uuid` (FK) |
 | `competition_results` | `competition_uuid` + `player_uuid` (composite PK), `position` |
+| `player_ratings` | `player_uuid` (PK, FK), `rating`, `match_count`, `last_recalculated_at` |
+
+---
+
+## Elo rating system
+
+Player ratings are computed using a customised [Elo rating system](https://en.wikipedia.org/wiki/Elo_rating_system). This estimates the relative skill level of each player based on their match history and is used to power the leaderboard and `predict-match` command.
+
+### How Elo works
+
+Every player starts at a rating of **1000**. After each match, points are transferred from the loser to the winner. The amount transferred depends on how surprising the result was:
+
+- Beating a much higher-rated player earns a lot of points — the upset was unlikely
+- Beating a much lower-rated player earns very few — the outcome was expected
+- Two evenly-matched players exchange around 16 points per match
+
+The formula is:
+
+```
+Expected win probability:  E = 1 / (1 + 10^((opponent_rating - your_rating) / 400))
+Rating change:             Δ = 32 × (result - E)
+```
+
+Where `result` is 1 for a win, 0 for a loss, and 0 for a draw. **K=32** means the maximum any single match can move your rating is 32 points (achieved when a 100% underdog pulls off an upset).
+
+### Swiss rounds only
+
+Only **Swiss rounds** (Round 1, Round 2, etc.) affect Elo ratings. Elimination rounds (Top 8, Top 4, Top 2) are handled differently — see below. Draws in any phase have no effect on ratings.
+
+This means reaching Top 8 doesn't cost you Elo if you lose — your Swiss performance is what builds your rating.
+
+### Knockout rounds — zero-sum distribution
+
+Knockout matches are **zero-sum**: winners gain Elo, but instead of the loser absorbing that loss, it is shared equally across a growing pool of eliminated players.
+
+Here's how the pool works for a 32-player tournament with a Top 8 cut:
+
+1. **Before knockouts start:** The pool contains all 24 players who didn't make the top cut.
+2. **Quarterfinals (Top 8 round):** The 4 winners each gain Elo. The 4 losers join the pool — now 28 players. All 28 share the total Elo gained by the 4 winners, taking an equal deduction each.
+3. **Semifinals (Top 4 round):** The 2 winners gain Elo. The 2 losers join the pool — now 30 players. All 30 share the total gain.
+4. **Final (Top 2 round):** The winner gains Elo. The finalist joins the pool — now 31 players. All 31 share the gain.
+
+The winner of the event gains a small amount of Elo; every other player at the event takes a small, equal deduction. The total Elo across the whole field is unchanged — no inflation.
+
+This design means:
+- Making the top cut is strictly better for your rating than not making it (you skip the early pool deductions)
+- A player who finishes Swiss 4-0 and loses in the quarters will always end the event with more Elo than a player who went 0-4 at the same event
+- Every tournament is, in aggregate, a zero-sum redistribution of Elo within the field
+
+### Match count and reliability
+
+The **match count** shown alongside each rating tracks how many Swiss matches a player has played. A player with 20+ matches has a well-established rating; a player with 3 matches may have a rating that doesn't yet reflect their true skill. Use match count as a reliability signal — especially when using `predict-match` for players with limited history.
+
+### Recalculation
+
+Ratings are always computed **from scratch** across all historical data in chronological order. There is no incremental update mechanism. This means:
+
+- Adding new competitions and re-running `update-ratings` will produce a fully re-derived leaderboard
+- The results are deterministic — running `update-ratings` twice produces the same output
+- The stored `player_ratings` table is a cache of the most recent calculation — it must be updated manually after importing new data
 
 ### A note on player and venue names
 

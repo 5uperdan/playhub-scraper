@@ -8,6 +8,7 @@ Usage:
 """
 
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -185,6 +186,7 @@ def update_from_source(source_file, replace):
         links = _scrape.extract_playhub_links_from_xlsx(xlsx_bytes)
         click.echo(f"Found {len(links)} Play Hub links in {source_file}")
 
+        new_data_inserted = False
         for url in links:
             event_id = _scrape.get_event_id_from_url(url)
             if event_id is None:
@@ -212,6 +214,8 @@ def update_from_source(source_file, replace):
             player_count = event.get("starting_player_count")
 
             existing_comp = session.query(_db.Competition).filter_by(ph_event_id=event_id).first()
+            if existing_comp is None or replace:
+                new_data_inserted = True
             if existing_comp and replace:
                 click.echo(f"    Replacing existing data for event {event_id}")
                 session.query(_db.Match).filter_by(competition_uuid=existing_comp.uuid).delete()
@@ -321,6 +325,128 @@ def update_from_source(source_file, replace):
         session.commit()
 
     click.echo("Done.")
+    if new_data_inserted:
+        click.echo("\nRatings may be stale — run 'uv run main.py update-ratings' to recalculate.")
+
+
+# ---------------------------------------------------------------------------
+# Ratings helpers
+# ---------------------------------------------------------------------------
+
+
+def _ordinal(n: int) -> str:
+    """Return ordinal string for a number, e.g. 1 -> '1st'."""
+    if 11 <= (n % 100) <= 13:
+        return f"{n}th"
+    suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def _is_elimination_round(round_name: str) -> bool:
+    """Return True for knockout rounds (Top N), False for Swiss (Round N)."""
+    return bool(re.match(r"^Top \d+$", round_name))
+
+
+def _compute_ratings(session) -> dict:
+    """
+    Replay all matches chronologically and compute Elo ratings.
+
+    Rules:
+    - Swiss rounds only: standard Elo (K=32). Draws have no effect.
+    - Elimination rounds: winners gain Elo normally. The total Elo gained by
+      all winners in a knockout round is distributed as an equal loss across
+      the cumulative eliminated pool (Swiss non-qualifiers + all prior knockout
+      losers + this round's losers). The pool grows each round.
+    - Always computed from scratch from all stored matches.
+
+    Returns {player_uuid: (rating, swiss_match_count)}.
+    """
+    K = 32
+    ratings = {}  # player_uuid -> float
+    swiss_match_counts = {}  # player_uuid -> int
+
+    def get_rating(uuid):
+        return ratings.get(uuid, 1000.0)
+
+    def expected(ra, rb):
+        return 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))
+
+    comps = session.query(_db.Competition).order_by(_db.Competition.start_date).all()
+
+    for comp in comps:
+        all_matches = session.query(_db.Match).filter_by(competition_uuid=comp.uuid).all()
+
+        swiss_matches = [m for m in all_matches if not _is_elimination_round(m.round.name if m.round else "")]
+        elim_matches = [m for m in all_matches if _is_elimination_round(m.round.name if m.round else "")]
+
+        swiss_matches.sort(key=_round_sort_key)
+
+        # Track all players appearing in Swiss and in elimination
+        swiss_participants = set()
+        for m in swiss_matches:
+            swiss_participants.add(m.player_a_uuid)
+            swiss_participants.add(m.player_b_uuid)
+
+        knockout_participants = set()
+        for m in elim_matches:
+            knockout_participants.add(m.player_a_uuid)
+            knockout_participants.add(m.player_b_uuid)
+
+        # --- Swiss phase ---
+        for m in swiss_matches:
+            if m.winning_player_uuid is None:  # draw — skip
+                continue
+            winner_uuid = m.winning_player_uuid
+            loser_uuid = m.player_b_uuid if m.player_a_uuid == winner_uuid else m.player_a_uuid
+            ra, rb = get_rating(winner_uuid), get_rating(loser_uuid)
+            ea = expected(ra, rb)
+            ratings[winner_uuid] = ra + K * (1 - ea)
+            ratings[loser_uuid] = rb + K * (0 - (1 - ea))
+            swiss_match_counts[winner_uuid] = swiss_match_counts.get(winner_uuid, 0) + 1
+            swiss_match_counts[loser_uuid] = swiss_match_counts.get(loser_uuid, 0) + 1
+
+        # --- Elimination phase ---
+        # Players who didn't make the top cut start in the eliminated pool
+        eliminated_pool = swiss_participants - knockout_participants
+
+        # Group elimination matches by round name, sort descending by N
+        # (Top 16 before Top 8 before Top 4 before Top 2)
+        elim_by_round = {}
+        for m in elim_matches:
+            rname = m.round.name if m.round else ""
+            elim_by_round.setdefault(rname, []).append(m)
+
+        def _elim_sort_key(rname):
+            match = re.match(r"^Top (\d+)$", rname)
+            return -int(match.group(1)) if match else 0
+
+        for rname in sorted(elim_by_round.keys(), key=_elim_sort_key):
+            round_elo_gained = 0.0
+            round_losers = set()
+
+            for m in elim_by_round[rname]:
+                if m.winning_player_uuid is None:  # draw — no effect
+                    continue
+                winner_uuid = m.winning_player_uuid
+                loser_uuid = m.player_b_uuid if m.player_a_uuid == winner_uuid else m.player_a_uuid
+                ra, rb = get_rating(winner_uuid), get_rating(loser_uuid)
+                ea = expected(ra, rb)
+                gain = K * (1 - ea)
+                ratings[winner_uuid] = ra + gain
+                round_elo_gained += gain
+                round_losers.add(loser_uuid)
+
+            # Add this round's losers to the cumulative pool
+            eliminated_pool.update(round_losers)
+
+            # Distribute the total gain as an equal loss across the whole pool
+            if round_elo_gained > 0 and eliminated_pool:
+                loss_per_player = round_elo_gained / len(eliminated_pool)
+                for uuid in eliminated_pool:
+                    ratings[uuid] = get_rating(uuid) - loss_per_player
+
+    all_uuids = set(ratings.keys()) | set(swiss_match_counts.keys())
+    return {uuid: (ratings.get(uuid, 1000.0), swiss_match_counts.get(uuid, 0)) for uuid in all_uuids}
 
 
 # ---------------------------------------------------------------------------
@@ -344,7 +470,14 @@ def _round_sort_key(match):
 
 def _print_player_info(session, player):
     """Print a player's competition history to stdout."""
-    click.echo(player.name)
+    pr = session.query(_db.PlayerRating).filter_by(player_uuid=player.uuid).first()
+    if pr is not None:
+        total_rated = session.query(_db.PlayerRating).count()
+        rank = session.query(_db.PlayerRating).filter(_db.PlayerRating.rating > pr.rating).count() + 1
+        elo_str = f" [Elo: {pr.rating:.2f} | {_ordinal(rank)} of {total_rated} | {pr.match_count} matches]"
+    else:
+        elo_str = ""
+    click.echo(f"{player.name}{elo_str}")
 
     results = session.query(_db.CompetitionResult).filter_by(player_uuid=player.uuid).all()
 
@@ -499,6 +632,155 @@ def tournament_report(url):
                 continue
 
             _print_player_info(session, player)
+
+
+# ---------------------------------------------------------------------------
+# Command: update-ratings
+# ---------------------------------------------------------------------------
+
+
+@cli.command("update-ratings")
+def update_ratings():
+    """Recompute Elo ratings for all players from scratch and store them.
+
+    Ratings are always recalculated from the full match history — no incremental
+    updates. Run this after importing new competition data with update-from-source.
+    """
+    engine = _db.init_db()
+    Session = _db.make_session_factory(engine)
+
+    with Session() as session:
+        click.echo("Computing ratings from scratch…")
+        ratings = _compute_ratings(session)
+
+        now = datetime.now(timezone.utc)
+        for player_uuid, (rating, match_count) in ratings.items():
+            existing = session.query(_db.PlayerRating).filter_by(player_uuid=player_uuid).first()
+            if existing is None:
+                session.add(
+                    _db.PlayerRating(
+                        player_uuid=player_uuid,
+                        rating=rating,
+                        match_count=match_count,
+                        last_recalculated_at=now,
+                    )
+                )
+            else:
+                existing.rating = rating
+                existing.match_count = match_count
+                existing.last_recalculated_at = now
+
+        session.commit()
+        click.echo(f"Updated ratings for {len(ratings)} players.")
+
+        top = (
+            session.query(_db.PlayerRating)
+            .join(_db.Player, _db.PlayerRating.player_uuid == _db.Player.uuid)
+            .order_by(_db.PlayerRating.rating.desc())
+            .limit(10)
+            .all()
+        )
+        click.echo("\nTop 10:")
+        for i, pr in enumerate(top, 1):
+            click.echo(f"  {i:3}. {pr.player.name:<30} {pr.rating:7.2f}  ({pr.match_count} matches)")
+
+
+# ---------------------------------------------------------------------------
+# Command: player-ratings
+# ---------------------------------------------------------------------------
+
+
+@cli.command("player-ratings")
+@click.option("--top", "top_n", default=25, show_default=True, help="Number of players to show.")
+def player_ratings(top_n):
+    """Show the Elo rating leaderboard.
+
+    Displays the top N players sorted by rating. The match count shows how
+    many Swiss matches a player has played — a higher count means a more
+    reliable rating.
+
+    Run update-ratings first to generate or refresh the ratings.
+    """
+    engine = _db.init_db()
+    Session = _db.make_session_factory(engine)
+
+    with Session() as session:
+        results = (
+            session.query(_db.PlayerRating)
+            .join(_db.Player, _db.PlayerRating.player_uuid == _db.Player.uuid)
+            .order_by(_db.PlayerRating.rating.desc())
+            .limit(top_n)
+            .all()
+        )
+
+        if not results:
+            click.echo("No ratings found. Run 'uv run main.py update-ratings' first.")
+            return
+
+        total_rated = session.query(_db.PlayerRating).count()
+        click.echo(f"Elo Leaderboard — top {min(top_n, len(results))} of {total_rated} rated players\n")
+        for i, pr in enumerate(results, 1):
+            click.echo(f"  {i:3}. {pr.player.name:<30} {pr.rating:7.2f}  ({pr.match_count} matches)")
+
+
+# ---------------------------------------------------------------------------
+# Command: predict-match
+# ---------------------------------------------------------------------------
+
+
+@cli.command("predict-match")
+@click.option("--player1", required=True, help="Name of the first player (partial match).")
+@click.option("--player2", required=True, help="Name of the second player (partial match).")
+def predict_match(player1, player2):
+    """Estimate win probability for a head-to-head match.
+
+    Looks up stored Elo ratings for both players and calculates expected win
+    probability from the rating difference. Players with fewer than 5 Swiss
+    matches will trigger a low-confidence warning.
+
+    Run update-ratings first to ensure ratings are current.
+    """
+    LOW_MATCH_THRESHOLD = 5
+
+    engine = _db.init_db()
+    Session = _db.make_session_factory(engine)
+
+    with Session() as session:
+
+        def lookup(name):
+            players = session.query(_db.Player).filter(_db.Player.name.ilike(f"%{name}%")).all()
+            if not players:
+                return None, 1000.0, 0
+            player = players[0]
+            pr = session.query(_db.PlayerRating).filter_by(player_uuid=player.uuid).first()
+            return player, (pr.rating if pr else 1000.0), (pr.match_count if pr else 0)
+
+        p1, r1, mc1 = lookup(player1)
+        p2, r2, mc2 = lookup(player2)
+
+        if p1 is None:
+            click.echo(f"No player found matching '{player1}'", err=True)
+            sys.exit(1)
+        if p2 is None:
+            click.echo(f"No player found matching '{player2}'", err=True)
+            sys.exit(1)
+
+        e1 = 1.0 / (1.0 + 10 ** ((r2 - r1) / 400.0))
+        e2 = 1.0 - e1
+
+        click.echo(f"\n  {p1.name} vs {p2.name}\n")
+        click.echo(f"  {p1.name:<30} Elo: {r1:7.2f}  Win probability: {e1 * 100:.1f}%")
+        click.echo(f"  {p2.name:<30} Elo: {r2:7.2f}  Win probability: {e2 * 100:.1f}%")
+
+        warnings = []
+        if mc1 < LOW_MATCH_THRESHOLD:
+            warnings.append(f"  Warning: {p1.name} has only {mc1} Swiss match(es) — low confidence.")
+        if mc2 < LOW_MATCH_THRESHOLD:
+            warnings.append(f"  Warning: {p2.name} has only {mc2} Swiss match(es) — low confidence.")
+        if warnings:
+            click.echo("")
+            for w in warnings:
+                click.echo(w)
 
 
 # ---------------------------------------------------------------------------

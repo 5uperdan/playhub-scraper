@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlalchemy import (
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -82,6 +83,7 @@ class Player(Base):
     matches_as_b = relationship("Match", foreign_keys="Match.player_b_uuid", back_populates="player_b")
     match_wins = relationship("Match", foreign_keys="Match.winning_player_uuid", back_populates="winning_player")
     results = relationship("CompetitionResult", back_populates="player")
+    rating = relationship("PlayerRating", back_populates="player", uselist=False)
 
 
 class Round(Base):
@@ -147,6 +149,19 @@ class CompetitionResult(Base):
     player = relationship("Player", back_populates="results")
 
     __table_args__ = (UniqueConstraint("competition_uuid", "player_uuid"),)
+
+
+class PlayerRating(Base):
+    """Cached Elo rating for a player, recomputed by the update-ratings command."""
+
+    __tablename__ = "player_ratings"
+
+    player_uuid = Column(String, ForeignKey("players.uuid"), primary_key=True)
+    rating = Column(Float, nullable=False, default=1000.0)
+    match_count = Column(Integer, nullable=False, default=0)
+    last_recalculated_at = Column(DateTime, nullable=True)
+
+    player = relationship("Player", back_populates="rating")
 
 
 def init_db(engine=None):

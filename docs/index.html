@@ -414,6 +414,7 @@
         <div class="tabs">
             <button class="tab-btn active" data-tab="competitions">Competitions</button>
             <button class="tab-btn" data-tab="players">Players</button>
+            <button class="tab-btn" data-tab="leaderboard">Leaderboard</button>
         </div>
 
         <!-- Competitions tab -->
@@ -445,6 +446,27 @@
                 <span id="player-count" class="count-label"></span>
             </div>
             <div id="player-list" class="player-list"></div>
+        </div>
+
+        <!-- Leaderboard tab -->
+        <div id="tab-leaderboard" class="tab-content">
+            <div class="controls">
+                <input id="lb-filter" type="text" placeholder="Filter by player name…" autocomplete="off">
+                <span id="lb-count" class="count-label"></span>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="text-align:right">Rank</th>
+                            <th>Player</th>
+                            <th style="text-align:right">Elo Rating</th>
+                            <th style="text-align:right">Swiss Matches</th>
+                        </tr>
+                    </thead>
+                    <tbody id="lb-tbody"></tbody>
+                </table>
+            </div>
         </div>
     </div>
 
@@ -557,6 +579,7 @@
                 });
                 if (tab === 'competitions') renderCompetitions();
                 if (tab === 'players') renderPlayers();
+                if (tab === 'leaderboard') renderLeaderboard();
             });
         });
 
@@ -770,6 +793,72 @@
             });
 
             bodyEl.innerHTML = sections.join('');
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  Leaderboard tab
+        // ═══════════════════════════════════════════════════════════
+        let lbFilter = '';
+        const lbFilterInput = document.getElementById('lb-filter');
+
+        lbFilterInput.addEventListener('input', () => {
+            lbFilter = lbFilterInput.value.trim();
+            renderLeaderboard();
+        });
+
+        function renderLeaderboard() {
+            const tbody = document.getElementById('lb-tbody');
+            const countEl = document.getElementById('lb-count');
+
+            // Check whether the player_ratings table exists (db may pre-date this feature)
+            const tableExists = query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='player_ratings'"
+            ).length > 0;
+
+            if (!tableExists) {
+                tbody.innerHTML = `<tr><td colspan="4" class="empty">No ratings data found. Run <code>uv run main.py update-ratings</code> and re-upload your database.</td></tr>`;
+                countEl.textContent = '';
+                return;
+            }
+
+            // Fetch all rated players, join to get names, sorted by rating desc
+            const allRows = query(`
+    SELECT pr.rating, pr.match_count, p.name
+    FROM player_ratings pr
+    JOIN players p ON p.uuid = pr.player_uuid
+    ORDER BY pr.rating DESC
+  `);
+
+            if (!allRows.length) {
+                tbody.innerHTML = `<tr><td colspan="4" class="empty">No ratings found. Run <code>uv run main.py update-ratings</code> and re-upload your database.</td></tr>`;
+                countEl.textContent = '';
+                return;
+            }
+
+            // Apply name filter (preserving global rank numbers)
+            const pattern = lbFilter.toLowerCase();
+            const filtered = allRows
+                .map((r, i) => ({ ...r, rank: i + 1 }))
+                .filter(r => !pattern || r.name.toLowerCase().includes(pattern));
+
+            if (!filtered.length) {
+                tbody.innerHTML = `<tr><td colspan="4" class="empty">No players match your filter</td></tr>`;
+                countEl.textContent = '';
+                return;
+            }
+
+            countEl.textContent = pattern
+                ? `${filtered.length} of ${allRows.length} players`
+                : `${allRows.length} players`;
+
+            tbody.innerHTML = filtered.map(r => `
+    <tr>
+      <td style="text-align:right;color:#94a3b8">${r.rank}</td>
+      <td>${esc(r.name)}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums">${Number(r.rating).toFixed(2)}</td>
+      <td style="text-align:right;color:#94a3b8">${r.match_count}</td>
+    </tr>
+  `).join('');
         }
 
         // ═══════════════════════════════════════════════════════════
