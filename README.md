@@ -12,11 +12,12 @@ This project was fully vibe coded by Claude with not a single line of code writt
 
 ## Using the web interface
 
-The [web interface](https://5uperdan.github.io/playhub-scraper/) lets you explore competition results and player histories in your browser. It has three tabs:
+The [web interface](https://5uperdan.github.io/playhub-scraper/) lets you explore competition results and player histories in your browser. It has four tabs:
 
 - **Competitions** — browse and filter all competitions by name or venue, see player counts and winners
 - **Players** — search by name, then click a player to expand their full competition and match history
 - **Leaderboard** — browse the Elo rating leaderboard for all players, filterable by name
+- **Prediction Accuracy** — calibration chart and experience breakdown evaluating how well the Elo win predictions match real outcomes
 
 All queries run entirely in your browser against your database — no external communication is required and once the page is loaded, queries should work even when you're offline.
 
@@ -186,6 +187,25 @@ A warning is shown if either player has fewer than 5 Swiss matches, as their rat
 
 ---
 
+### `run-backtest`
+
+Backtests Elo win-probability predictions against historical match outcomes and stores calibration data in the database. Run this after `update-ratings`.
+
+```bash
+uv run main.py run-backtest
+```
+
+Matches are replayed chronologically. The predicted win probability is recorded *before* the corresponding Elo update is applied — this means every prediction is genuinely out-of-sample; the model hasn't yet seen the match it's predicting. Both Swiss and knockout decisive matches are included; draws are skipped.
+
+Output includes:
+- **Brier score** — a single-number accuracy summary (random-guess baseline = 0.2500, perfect = 0.0000; lower is better)
+- **Calibration table** — predicted probability buckets vs actual win rates
+- **Experience breakdown** — whether predictions are better when both players have more match history
+
+Results are stored in the database so the web interface **Prediction Accuracy** tab can display them.
+
+---
+
 ### `list-competitions [--name <filter>]`
 
 Lists all processed competitions sorted by date, showing the venue, competition name, winner, and player count. Optionally filter by competition or venue name (case-insensitive, partial match).
@@ -217,6 +237,9 @@ Example output:
 | `matches` | `uuid` (PK), `player_a_uuid` (FK), `player_b_uuid` (FK), `player_a_score`, `player_b_score`, `winning_player_uuid` (FK, NULL = draw), `competition_uuid` (FK), `round_uuid` (FK) |
 | `competition_results` | `competition_uuid` + `player_uuid` (composite PK), `position` |
 | `player_ratings` | `player_uuid` (PK, FK), `rating`, `match_count`, `last_recalculated_at` |
+| `backtest_summary` | `id` (PK), `total_matches`, `brier_score`, `run_at` |
+| `backtest_buckets` | `bucket_min` (PK), `match_count`, `actual_wins` |
+| `backtest_experience` | `tier_label` (PK), `tier_min`, `match_count`, `actual_wins`, `sum_predicted` |
 
 ---
 
@@ -276,6 +299,17 @@ Ratings are always computed **from scratch** across all historical data in chron
 - Adding new competitions and re-running `update-ratings` will produce a fully re-derived leaderboard
 - The results are deterministic — running `update-ratings` twice produces the same output
 - The stored `player_ratings` table is a cache of the most recent calculation — it must be updated manually after importing new data
+
+### Model accuracy
+
+Running `run-backtest` against the dataset gives a feel for how well the predictions hold up:
+
+- **Brier score: 0.2446** — just below the random-guess baseline of 0.2500, confirming the model adds genuine signal but not a large amount
+- **Systematic under-confidence** — in every probability bucket, players win slightly *more* often than predicted. When the model says 60%, players actually win around 67%. This suggests the Elo rating differences are real but underestimated
+- **Data-constrained, not wrong** — 77% of all evaluated matches fall in the 50–55% bucket, because most players have short histories and their ratings cluster near 1000. The model correctly says "roughly 50/50" when it doesn't know enough; the slight positive error reflects genuine skill differences the limited data can't yet quantify
+- **Experience matters** — predictions involving at least one player with fewer than 5 Swiss matches show a larger error than predictions between more experienced players, as expected
+
+As more competition data is collected, ratings will stabilise further from 1000 and predictions will become more differentiated.
 
 ### A note on player and venue names
 

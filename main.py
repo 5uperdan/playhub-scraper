@@ -794,6 +794,239 @@ def predict_match(player1, player2):
 
 
 # ---------------------------------------------------------------------------
+# Backtest helper
+# ---------------------------------------------------------------------------
+
+_EXP_TIERS = [
+    ("0", 0, lambda n: n == 0),
+    ("1-4", 1, lambda n: 1 <= n <= 4),
+    ("5-9", 5, lambda n: 5 <= n <= 9),
+    ("10-19", 10, lambda n: 10 <= n <= 19),
+    ("20+", 20, lambda n: n >= 20),
+]
+_BUCKET_MINS = [round(0.50 + i * 0.05, 2) for i in range(10)]  # 0.50 … 0.95
+
+
+def _compute_backtest(session):
+    """
+    Replay all matches chronologically, capturing pre-match win predictions,
+    then evaluate calibration against actual outcomes.
+
+    Predictions are always recorded from the favourite's perspective (prob ≥ 0.5)
+    to avoid symmetric duplication. Both Swiss and knockout decisive matches are
+    included. Draws are skipped.
+
+    Returns (total_matches, brier_score, bucket_data, exp_data) where:
+      bucket_data: {bucket_min: {"count": int, "wins": int}}
+      exp_data:    {tier_label: {"tier_min": int, "count": int, "wins": int,
+                                 "sum_pred": float}}
+    """
+    K = 32
+    ratings = {}
+    swiss_counts = {}
+
+    def get_rating(uuid):
+        return ratings.get(uuid, 1000.0)
+
+    def elo_expected(ra, rb):
+        return 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))
+
+    bucket_data = {b: {"count": 0, "wins": 0} for b in _BUCKET_MINS}
+    exp_data = {label: {"tier_min": tmin, "count": 0, "wins": 0, "sum_pred": 0.0} for label, tmin, _ in _EXP_TIERS}
+    total_matches = 0
+    brier_sum = 0.0
+
+    def _record(pa_uuid, pb_uuid, winner_uuid):
+        """Record one prediction and update accumulators (nonlocal)."""
+        nonlocal total_matches, brier_sum
+        ra, rb = get_rating(pa_uuid), get_rating(pb_uuid)
+        ea = elo_expected(ra, rb)
+
+        # Always evaluate from the favourite's perspective
+        if ea >= 0.5:
+            fav_prob = ea
+            fav_won = winner_uuid == pa_uuid
+        else:
+            fav_prob = 1.0 - ea
+            fav_won = winner_uuid == pb_uuid
+
+        actual = 1 if fav_won else 0
+
+        # Calibration bucket
+        raw = fav_prob - (fav_prob % 0.05)
+        bucket_key = round(min(0.95, max(0.50, raw)), 2)
+        bucket_data[bucket_key]["count"] += 1
+        bucket_data[bucket_key]["wins"] += actual
+
+        # Experience tier — keyed by the less experienced player
+        min_count = min(swiss_counts.get(pa_uuid, 0), swiss_counts.get(pb_uuid, 0))
+        for label, _, pred in _EXP_TIERS:
+            if pred(min_count):
+                exp_data[label]["count"] += 1
+                exp_data[label]["wins"] += actual
+                exp_data[label]["sum_pred"] += fav_prob
+                break
+
+        brier_sum += (fav_prob - actual) ** 2
+        total_matches += 1
+
+    comps = session.query(_db.Competition).order_by(_db.Competition.start_date).all()
+
+    for comp in comps:
+        all_matches = session.query(_db.Match).filter_by(competition_uuid=comp.uuid).all()
+
+        swiss_matches = [m for m in all_matches if not _is_elimination_round(m.round.name if m.round else "")]
+        elim_matches = [m for m in all_matches if _is_elimination_round(m.round.name if m.round else "")]
+        swiss_matches.sort(key=_round_sort_key)
+
+        swiss_participants = set()
+        for m in swiss_matches:
+            swiss_participants.add(m.player_a_uuid)
+            swiss_participants.add(m.player_b_uuid)
+
+        knockout_participants = set()
+        for m in elim_matches:
+            knockout_participants.add(m.player_a_uuid)
+            knockout_participants.add(m.player_b_uuid)
+
+        # --- Swiss phase ---
+        for m in swiss_matches:
+            if m.winning_player_uuid is None:
+                continue
+
+            _record(m.player_a_uuid, m.player_b_uuid, m.winning_player_uuid)
+
+            # Apply Elo update after recording
+            winner_uuid = m.winning_player_uuid
+            loser_uuid = m.player_b_uuid if m.player_a_uuid == winner_uuid else m.player_a_uuid
+            ea = elo_expected(get_rating(winner_uuid), get_rating(loser_uuid))
+            ratings[winner_uuid] = get_rating(winner_uuid) + K * (1 - ea)
+            ratings[loser_uuid] = get_rating(loser_uuid) + K * (0 - (1 - ea))
+            swiss_counts[winner_uuid] = swiss_counts.get(winner_uuid, 0) + 1
+            swiss_counts[loser_uuid] = swiss_counts.get(loser_uuid, 0) + 1
+
+        # --- Elimination phase ---
+        eliminated_pool = swiss_participants - knockout_participants
+
+        elim_by_round = {}
+        for m in elim_matches:
+            rname = m.round.name if m.round else ""
+            elim_by_round.setdefault(rname, []).append(m)
+
+        def _elim_sort_key(rname):
+            match = re.match(r"^Top (\d+)$", rname)
+            return -int(match.group(1)) if match else 0
+
+        for rname in sorted(elim_by_round.keys(), key=_elim_sort_key):
+            round_elo_gained = 0.0
+            round_losers = set()
+
+            for m in elim_by_round[rname]:
+                if m.winning_player_uuid is None:
+                    continue
+
+                _record(m.player_a_uuid, m.player_b_uuid, m.winning_player_uuid)
+
+                winner_uuid = m.winning_player_uuid
+                loser_uuid = m.player_b_uuid if m.player_a_uuid == winner_uuid else m.player_a_uuid
+                gain = K * (1 - elo_expected(get_rating(winner_uuid), get_rating(loser_uuid)))
+                ratings[winner_uuid] = get_rating(winner_uuid) + gain
+                round_elo_gained += gain
+                round_losers.add(loser_uuid)
+
+            eliminated_pool.update(round_losers)
+            if round_elo_gained > 0 and eliminated_pool:
+                loss_per = round_elo_gained / len(eliminated_pool)
+                for uuid in eliminated_pool:
+                    ratings[uuid] = get_rating(uuid) - loss_per
+
+    brier_score = brier_sum / total_matches if total_matches else 0.0
+    return total_matches, brier_score, bucket_data, exp_data
+
+
+# ---------------------------------------------------------------------------
+# Command: run-backtest
+# ---------------------------------------------------------------------------
+
+
+@cli.command("run-backtest")
+def run_backtest():
+    """Evaluate Elo win-probability predictions against historical match outcomes.
+
+    Replays all matches chronologically, recording the predicted win probability
+    before each Elo update is applied (genuine out-of-sample evaluation). Both
+    Swiss and knockout decisive matches are included; draws are skipped.
+
+    Results are stored in the database so the web interface can display them,
+    and a calibration summary is printed to the terminal.
+
+    Run update-ratings first, then run this command after importing new data.
+    """
+    engine = _db.init_db()
+    Session = _db.make_session_factory(engine)
+
+    with Session() as session:
+        click.echo("Running backtest…")
+        total, brier, bucket_data, exp_data = _compute_backtest(session)
+
+        # --- Persist results ---
+        # Clear old data
+        session.query(_db.BacktestBucket).delete()
+        session.query(_db.BacktestExperience).delete()
+        session.query(_db.BacktestSummary).delete()
+
+        now = datetime.now(timezone.utc)
+        session.add(_db.BacktestSummary(id=1, total_matches=total, brier_score=brier, run_at=now))
+        for bmin, d in bucket_data.items():
+            if d["count"] > 0:
+                session.add(_db.BacktestBucket(bucket_min=bmin, match_count=d["count"], actual_wins=d["wins"]))
+        for label, d in exp_data.items():
+            session.add(
+                _db.BacktestExperience(
+                    tier_label=label,
+                    tier_min=d["tier_min"],
+                    match_count=d["count"],
+                    actual_wins=d["wins"],
+                    sum_predicted=d["sum_pred"],
+                )
+            )
+        session.commit()
+
+        # --- Print summary ---
+        click.echo(f"\nBacktested {total} decisive matches.")
+        click.echo(f"Brier score: {brier:.4f}  (random-guess baseline = 0.2500, perfect = 0.0000)\n")
+
+        click.echo("Calibration by predicted probability (favourite's perspective):")
+        click.echo(f"  {'Bucket':<10} {'Predicted':>10} {'Actual':>10} {'Matches':>9}")
+        click.echo(f"  {'-'*44}")
+        for bmin in _BUCKET_MINS:
+            d = bucket_data[bmin]
+            if d["count"] == 0:
+                continue
+            bmax = round(bmin + 0.05, 2)
+            predicted_mid = round(bmin + 0.025, 4)
+            actual_rate = d["wins"] / d["count"]
+            label = f"{int(bmin*100)}–{int(bmax*100)}%"
+            click.echo(f"  {label:<10} {predicted_mid*100:>9.1f}% {actual_rate*100:>9.1f}%  {d['count']:>7}")
+
+        click.echo("\nCalibration by experience (min Swiss matches of either player):")
+        click.echo(f"  {'Tier':<10} {'Matches':>8} {'Avg Pred':>10} {'Actual':>8} {'Error':>8}")
+        click.echo(f"  {'-'*48}")
+        for label, tmin, _ in _EXP_TIERS:
+            d = exp_data[label]
+            if d["count"] == 0:
+                continue
+            avg_pred = d["sum_pred"] / d["count"]
+            actual_rate = d["wins"] / d["count"]
+            error = actual_rate - avg_pred
+            sign = "+" if error >= 0 else ""
+            click.echo(
+                f"  {label:<10} {d['count']:>8} {avg_pred*100:>9.1f}% {actual_rate*100:>7.1f}%"
+                f" {sign}{error*100:>6.1f}%"
+            )
+
+
+# ---------------------------------------------------------------------------
 # Command: list-competitions
 # ---------------------------------------------------------------------------
 

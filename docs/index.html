@@ -415,6 +415,7 @@
             <button class="tab-btn active" data-tab="competitions">Competitions</button>
             <button class="tab-btn" data-tab="players">Players</button>
             <button class="tab-btn" data-tab="leaderboard">Leaderboard</button>
+            <button class="tab-btn" data-tab="accuracy">Prediction Accuracy</button>
         </div>
 
         <!-- Competitions tab -->
@@ -467,6 +468,11 @@
                     <tbody id="lb-tbody"></tbody>
                 </table>
             </div>
+        </div>
+
+        <!-- Prediction Accuracy tab -->
+        <div id="tab-accuracy" class="tab-content">
+            <div id="accuracy-content"></div>
         </div>
     </div>
 
@@ -580,6 +586,7 @@
                 if (tab === 'competitions') renderCompetitions();
                 if (tab === 'players') renderPlayers();
                 if (tab === 'leaderboard') renderLeaderboard();
+                if (tab === 'accuracy') renderAccuracy();
             });
         });
 
@@ -859,6 +866,138 @@
       <td style="text-align:right;color:#94a3b8">${r.match_count}</td>
     </tr>
   `).join('');
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  Prediction Accuracy tab
+        // ═══════════════════════════════════════════════════════════
+        function renderAccuracy() {
+            const container = document.getElementById('accuracy-content');
+
+            const tableExists = query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='backtest_summary'"
+            ).length > 0;
+
+            if (!tableExists) {
+                container.innerHTML = `<div class="empty" style="padding:3rem">No backtest data found. Run <code>uv run main.py run-backtest</code> and re-upload your database.</div>`;
+                return;
+            }
+
+            const summary = query('SELECT total_matches, brier_score FROM backtest_summary WHERE id=1');
+            if (!summary.length) {
+                container.innerHTML = `<div class="empty" style="padding:3rem">No backtest data found. Run <code>uv run main.py run-backtest</code> and re-upload your database.</div>`;
+                return;
+            }
+
+            const { total_matches, brier_score } = summary[0];
+            const buckets = query('SELECT bucket_min, match_count, actual_wins FROM backtest_buckets ORDER BY bucket_min');
+            const experience = query('SELECT tier_label, tier_min, match_count, actual_wins, sum_predicted FROM backtest_experience ORDER BY tier_min');
+
+            // ── SVG calibration chart ──
+            const svgW = 440, svgH = 380;
+            const mL = 65, mR = 25, mT = 25, mB = 55;
+            const plotW = svgW - mL - mR;
+            const plotH = svgH - mT - mB;
+
+            function xPos(p) { return mL + (p - 0.5) / 0.5 * plotW; }
+            function yPos(w) { return mT + plotH * (1 - w); }
+
+            const maxCount = Math.max(...buckets.map(b => b.match_count), 1);
+
+            // Grid lines and axis labels
+            let gridLines = '';
+            for (let i = 0; i <= 5; i++) {
+                const frac = i / 5;
+                const px = 0.5 + frac * 0.5;
+                const gx = xPos(px);
+                const gy = yPos(frac);
+                gridLines += `<line x1="${gx}" y1="${mT}" x2="${gx}" y2="${mT + plotH}" stroke="#e2e8f0" stroke-width="1"/>`;
+                gridLines += `<line x1="${mL}" y1="${gy}" x2="${mL + plotW}" y2="${gy}" stroke="#e2e8f0" stroke-width="1"/>`;
+                gridLines += `<text x="${gx}" y="${mT + plotH + 18}" text-anchor="middle" font-size="11" fill="#64748b">${Math.round(px * 100)}%</text>`;
+                gridLines += `<text x="${mL - 8}" y="${gy + 4}" text-anchor="end" font-size="11" fill="#64748b">${Math.round(frac * 100)}%</text>`;
+            }
+
+            // Perfect calibration diagonal
+            const perfLine = `<line x1="${xPos(0.5)}" y1="${yPos(0.5)}" x2="${xPos(1.0)}" y2="${yPos(1.0)}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,4"/>`;
+
+            // Data points (sized by match count, coloured by direction of error)
+            let dots = '';
+            for (const b of buckets) {
+                const midProb = b.bucket_min + 0.025;
+                const actualRate = b.actual_wins / b.match_count;
+                const cx = xPos(midProb);
+                const cy = yPos(actualRate);
+                const r = 5 + Math.sqrt(b.match_count / maxCount) * 18;
+                const over = actualRate >= midProb;
+                const fill = over ? '#3b82f6' : '#f97316';
+                const stroke = over ? '#1d4ed8' : '#c2410c';
+                const bucketLabel = `${Math.round(b.bucket_min * 100)}–${Math.round((b.bucket_min + 0.05) * 100)}%`;
+                dots += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="${fill}" fill-opacity="0.75" stroke="${stroke}" stroke-width="1.5"><title>${bucketLabel} predicted → ${(actualRate * 100).toFixed(1)}% actual (${b.match_count} matches)</title></circle>`;
+            }
+
+            // Axis labels
+            const axisLabels = `
+                <text x="${mL + plotW / 2}" y="${svgH - 8}" text-anchor="middle" font-size="12" fill="#475569">Predicted win probability</text>
+                <text x="${mL - 48}" y="${mT + plotH / 2}" text-anchor="middle" font-size="12" fill="#475569" transform="rotate(-90,${mL - 48},${mT + plotH / 2})">Actual win rate</text>`;
+
+            const svg = `<svg viewBox="0 0 ${svgW} ${svgH}" style="width:100%;max-width:${svgW}px;display:block">${gridLines}${perfLine}${dots}${axisLabels}</svg>`;
+
+            const legend = `<div style="display:flex;gap:1.5rem;flex-wrap:wrap;font-size:0.8rem;color:#64748b;margin:0.5rem 0 1.25rem">
+                <span><svg width="12" height="12" style="vertical-align:middle;margin-right:4px"><circle cx="6" cy="6" r="6" fill="#3b82f6" fill-opacity="0.75"/></svg>Actual &gt; predicted</span>
+                <span><svg width="12" height="12" style="vertical-align:middle;margin-right:4px"><circle cx="6" cy="6" r="6" fill="#f97316" fill-opacity="0.75"/></svg>Actual &lt; predicted</span>
+                <span><svg width="22" height="12" style="vertical-align:middle;margin-right:4px"><line x1="0" y1="6" x2="22" y2="6" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,3"/></svg>Perfect calibration</span>
+                <span>Dot size ∝ match count</span>
+            </div>`;
+
+            // ── Experience table ──
+            let expRows = '';
+            for (const e of experience) {
+                if (e.match_count === 0) continue;
+                const avgPred = e.sum_predicted / e.match_count;
+                const actualRate = e.actual_wins / e.match_count;
+                const error = actualRate - avgPred;
+                const sign = error >= 0 ? '+' : '';
+                const errColour = error >= 0 ? '#166534' : '#991b1b';
+                expRows += `<tr>
+                    <td>${esc(e.tier_label)}</td>
+                    <td style="text-align:right">${e.match_count}</td>
+                    <td style="text-align:right;font-variant-numeric:tabular-nums">${(avgPred * 100).toFixed(1)}%</td>
+                    <td style="text-align:right;font-variant-numeric:tabular-nums">${(actualRate * 100).toFixed(1)}%</td>
+                    <td style="text-align:right;font-variant-numeric:tabular-nums;color:${errColour}">${sign}${(error * 100).toFixed(1)}%</td>
+                </tr>`;
+            }
+
+            container.innerHTML = `
+                <div style="display:flex;gap:1.25rem;flex-wrap:wrap;margin-bottom:1.75rem">
+                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:1rem 1.5rem">
+                        <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:.05em;color:#64748b;margin-bottom:.25rem">Brier Score</div>
+                        <div style="font-size:1.75rem;font-weight:700;font-variant-numeric:tabular-nums">${Number(brier_score).toFixed(4)}</div>
+                        <div style="font-size:0.8rem;color:#94a3b8">baseline 0.2500 · perfect 0.0000</div>
+                    </div>
+                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:1rem 1.5rem">
+                        <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:.05em;color:#64748b;margin-bottom:.25rem">Matches Evaluated</div>
+                        <div style="font-size:1.75rem;font-weight:700;font-variant-numeric:tabular-nums">${Number(total_matches).toLocaleString()}</div>
+                        <div style="font-size:0.8rem;color:#94a3b8">decisive matches · draws excluded</div>
+                    </div>
+                </div>
+                <h3 style="font-size:1rem;font-weight:600;margin-bottom:0.4rem">Calibration chart</h3>
+                <p style="font-size:0.85rem;color:#64748b;margin-bottom:0.5rem">Each dot is a 5%-wide probability bucket. A well-calibrated model follows the dashed diagonal — when the model says 70%, players should win 70% of the time.</p>
+                ${legend}
+                ${svg}
+                <h3 style="font-size:1rem;font-weight:600;margin:2rem 0 0.4rem">Calibration by experience</h3>
+                <p style="font-size:0.85rem;color:#64748b;margin-bottom:1rem">Grouped by the minimum Swiss match count of the two players at prediction time. Positive error = players won more often than predicted.</p>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr>
+                            <th>Min Swiss matches</th>
+                            <th style="text-align:right">Matches</th>
+                            <th style="text-align:right">Avg predicted</th>
+                            <th style="text-align:right">Actual win rate</th>
+                            <th style="text-align:right">Error</th>
+                        </tr></thead>
+                        <tbody>${expRows}</tbody>
+                    </table>
+                </div>`;
         }
 
         // ═══════════════════════════════════════════════════════════

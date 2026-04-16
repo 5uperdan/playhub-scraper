@@ -164,6 +164,40 @@ class PlayerRating(Base):
     player = relationship("Player", back_populates="rating")
 
 
+class BacktestSummary(Base):
+    """Headline stats from the most recent backtest run (always a single row)."""
+
+    __tablename__ = "backtest_summary"
+
+    id = Column(Integer, primary_key=True)  # always 1
+    total_matches = Column(Integer, nullable=False)
+    brier_score = Column(Float, nullable=False)
+    run_at = Column(DateTime, nullable=True)
+
+
+class BacktestBucket(Base):
+    """Calibration data for one 5%-wide probability bucket."""
+
+    __tablename__ = "backtest_buckets"
+
+    # Lower bound of bucket, e.g. 0.50 covers predicted probabilities [0.50, 0.55)
+    bucket_min = Column(Float, primary_key=True)
+    match_count = Column(Integer, nullable=False)
+    actual_wins = Column(Integer, nullable=False)
+
+
+class BacktestExperience(Base):
+    """Calibration data grouped by experience (min Swiss matches of either player)."""
+
+    __tablename__ = "backtest_experience"
+
+    tier_label = Column(String, primary_key=True)  # e.g. "0", "1-4", "5-9"
+    tier_min = Column(Integer, nullable=False)  # numeric lower bound for ordering
+    match_count = Column(Integer, nullable=False)
+    actual_wins = Column(Integer, nullable=False)
+    sum_predicted = Column(Float, nullable=False)  # sum of predicted probs for avg
+
+
 def init_db(engine=None):
     """Create all tables if they don't exist."""
     if engine is None:
