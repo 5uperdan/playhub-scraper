@@ -474,7 +474,17 @@ def _print_player_info(session, player):
     if pr is not None:
         total_rated = session.query(_db.PlayerRating).count()
         rank = session.query(_db.PlayerRating).filter(_db.PlayerRating.rating > pr.rating).count() + 1
-        elo_str = f" [Elo: {pr.rating:.2f} | {_ordinal(rank)} of {total_rated} | {pr.match_count} matches]"
+        all_player_matches = (
+            session.query(_db.Match)
+            .filter((_db.Match.player_a_uuid == player.uuid) | (_db.Match.player_b_uuid == player.uuid))
+            .join(_db.Round, _db.Match.round_uuid == _db.Round.uuid)
+            .all()
+        )
+        knockout_count = sum(1 for m in all_player_matches if _is_elimination_round(m.round.name if m.round else ""))
+        elo_str = (
+            f" [Elo: {pr.rating:.2f} | {_ordinal(rank)} of {total_rated}"
+            f" | {pr.match_count} Swiss, {knockout_count} KO]"
+        )
     else:
         elo_str = ""
     click.echo(f"{player.name}{elo_str}")

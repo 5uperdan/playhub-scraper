@@ -106,7 +106,7 @@ uv run main.py player-info "Mickey"
 
 Example output:
 ```
-Mickey [Elo: 1104.37 | 3rd of 312 | 14 matches]
+Mickey [Elo: 1104.37 | 3rd of 312 | 14 Swiss, 3 KO]
   The Disney Store: 2026-04-05 (34 players)
     Round 1: Buzz 1 - 2 Mickey
     Round 2: Jim 0 - 2 Mickey
@@ -241,11 +241,11 @@ Rating change:             Δ = 32 × (result - E)
 
 Where `result` is 1 for a win, 0 for a loss, and 0 for a draw. **K=32** means the maximum any single match can move your rating is 32 points (achieved when a 100% underdog pulls off an upset).
 
-### Swiss rounds only
+### Swiss and knockout rounds
 
-Only **Swiss rounds** (Round 1, Round 2, etc.) affect Elo ratings. Elimination rounds (Top 8, Top 4, Top 2) are handled differently — see below. Draws in any phase have no effect on ratings.
+**Swiss rounds** (Round 1, Round 2, etc.) use standard Elo: a win gains points, a loss loses points. Draws have no effect on ratings.
 
-This means reaching Top 8 doesn't cost you Elo if you lose — your Swiss performance is what builds your rating.
+**Knockout rounds** also affect ratings, but through the zero-sum distribution mechanism described below rather than direct win/loss Elo transfer. In short, everyone at the tournament except the winner ends up losing a small amount of Elo from the knockout phase. Making the top cut reduces that loss — players who were eliminated in Swiss take pool deductions across every knockout round, whereas a player who reaches the Final only absorbs the deduction from that one round.
 
 ### Knockout rounds — zero-sum distribution
 
@@ -254,14 +254,14 @@ Knockout matches are **zero-sum**: winners gain Elo, but instead of the loser ab
 Here's how the pool works for a 32-player tournament with a Top 8 cut:
 
 1. **Before knockouts start:** The pool contains all 24 players who didn't make the top cut.
-2. **Quarterfinals (Top 8 round):** The 4 winners each gain Elo. The 4 losers join the pool — now 28 players. All 28 share the total Elo gained by the 4 winners, taking an equal deduction each.
-3. **Semifinals (Top 4 round):** The 2 winners gain Elo. The 2 losers join the pool — now 30 players. All 30 share the total gain.
-4. **Final (Top 2 round):** The winner gains Elo. The finalist joins the pool — now 31 players. All 31 share the gain.
+2. **Quarterfinals (Top 8 round):** The 4 winners each gain Elo. The 4 losers join the pool — now 28 players. All 28 take an equal deduction totalling the Elo the winners gained.
+3. **Semifinals (Top 4 round):** The 2 winners gain Elo. The 2 losers join the pool — now 30 players. All 30 take an equal deduction totalling the Elo the winners gained.
+4. **Final (Top 2 round):** The winner gains Elo. The finalist joins the pool — now 31 players. All 31 take an equal deduction totalling the Elo the winner gained.
 
 The winner of the event gains a small amount of Elo; every other player at the event takes a small, equal deduction. The total Elo across the whole field is unchanged — no inflation.
 
 This design means:
-- Making the top cut is strictly better for your rating than not making it (you skip the early pool deductions)
+- Making the top cut reduces your Elo losses from the knockout phase — Swiss-only players absorb pool deductions across every knockout round, while top cut players only absorb deductions from the rounds they've already been eliminated in
 - A player who finishes Swiss 4-0 and loses in the quarters will always end the event with more Elo than a player who went 0-4 at the same event
 - Every tournament is, in aggregate, a zero-sum redistribution of Elo within the field
 
