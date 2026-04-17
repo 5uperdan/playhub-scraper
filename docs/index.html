@@ -373,6 +373,46 @@
         .muted {
             color: #94a3b8;
         }
+
+        /* ── Tabs: scrollable on narrow screens ── */
+        .tabs {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+        }
+
+        .tabs::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* ── Mobile ── */
+        @media (max-width: 640px) {
+            header {
+                padding: 0 0.75rem;
+            }
+
+            .tab-btn {
+                padding: 0.65rem 0.875rem;
+                font-size: 0.875rem;
+                white-space: nowrap;
+            }
+
+            .tab-content {
+                padding: 0.875rem 0.75rem;
+            }
+
+            .controls {
+                flex-wrap: wrap;
+            }
+
+            .controls input {
+                max-width: none;
+            }
+
+            .comp-section {
+                padding: 0.875rem 1rem;
+            }
+        }
     </style>
 </head>
 
@@ -462,7 +502,8 @@
                             <th style="text-align:right">Rank</th>
                             <th>Player</th>
                             <th style="text-align:right">Elo Rating</th>
-                            <th style="text-align:right">Swiss Matches</th>
+                            <th style="text-align:right">Swiss</th>
+                            <th style="text-align:right">KO</th>
                         </tr>
                     </thead>
                     <tbody id="lb-tbody"></tbody>
@@ -823,21 +864,28 @@
             ).length > 0;
 
             if (!tableExists) {
-                tbody.innerHTML = `<tr><td colspan="4" class="empty">No ratings data found. Run <code>uv run main.py update-ratings</code> and re-upload your database.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="5" class="empty">No ratings data found. Run <code>uv run main.py update-ratings</code> and re-upload your database.</td></tr>`;
                 countEl.textContent = '';
                 return;
             }
 
             // Fetch all rated players, join to get names, sorted by rating desc
             const allRows = query(`
-    SELECT pr.rating, pr.match_count, p.name
+    SELECT pr.rating, pr.match_count AS swiss_count, p.name, p.uuid,
+      (
+        SELECT COUNT(*)
+        FROM matches m
+        JOIN rounds r ON r.uuid = m.round_uuid
+        WHERE (m.player_a_uuid = p.uuid OR m.player_b_uuid = p.uuid)
+          AND r.name LIKE 'Top %'
+      ) AS ko_count
     FROM player_ratings pr
     JOIN players p ON p.uuid = pr.player_uuid
     ORDER BY pr.rating DESC
   `);
 
             if (!allRows.length) {
-                tbody.innerHTML = `<tr><td colspan="4" class="empty">No ratings found. Run <code>uv run main.py update-ratings</code> and re-upload your database.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="5" class="empty">No ratings found. Run <code>uv run main.py update-ratings</code> and re-upload your database.</td></tr>`;
                 countEl.textContent = '';
                 return;
             }
@@ -849,7 +897,7 @@
                 .filter(r => !pattern || r.name.toLowerCase().includes(pattern));
 
             if (!filtered.length) {
-                tbody.innerHTML = `<tr><td colspan="4" class="empty">No players match your filter</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="5" class="empty">No players match your filter</td></tr>`;
                 countEl.textContent = '';
                 return;
             }
@@ -863,7 +911,8 @@
       <td style="text-align:right;color:#94a3b8">${r.rank}</td>
       <td>${esc(r.name)}</td>
       <td style="text-align:right;font-variant-numeric:tabular-nums">${Number(r.rating).toFixed(2)}</td>
-      <td style="text-align:right;color:#94a3b8">${r.match_count}</td>
+      <td style="text-align:right;color:#94a3b8">${r.swiss_count}</td>
+      <td style="text-align:right;color:#94a3b8">${r.ko_count}</td>
     </tr>
   `).join('');
         }
