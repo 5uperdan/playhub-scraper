@@ -10,7 +10,7 @@ import re
 from typing import Optional
 
 import requests
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 API_BASE = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2"
 HEADERS = {
