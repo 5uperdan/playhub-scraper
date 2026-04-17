@@ -5,6 +5,7 @@ Usage:
   uv run main.py add-set-championship-type --url <event-url>
   uv run main.py import-set-championship
   uv run main.py player-info <player-name>
+  uv run main.py leaderboard [--name <filter>] [--top <n>]
 """
 
 import re
@@ -534,19 +535,24 @@ def _round_sort_key(match):
     return (2, 0)
 
 
+def _get_knockout_count(session, player_uuid: str) -> int:
+    """Return the number of knockout (elimination) matches a player has played."""
+    all_player_matches = (
+        session.query(_db.Match)
+        .filter((_db.Match.player_a_uuid == player_uuid) | (_db.Match.player_b_uuid == player_uuid))
+        .join(_db.Round, _db.Match.round_uuid == _db.Round.uuid)
+        .all()
+    )
+    return sum(1 for m in all_player_matches if _is_elimination_round(m.round.name if m.round else ""))
+
+
 def _print_player_info(session, player):
     """Print a player's competition history to stdout."""
     pr = session.query(_db.PlayerRating).filter_by(player_uuid=player.uuid).first()
     if pr is not None:
         total_rated = session.query(_db.PlayerRating).count()
         rank = session.query(_db.PlayerRating).filter(_db.PlayerRating.rating > pr.rating).count() + 1
-        all_player_matches = (
-            session.query(_db.Match)
-            .filter((_db.Match.player_a_uuid == player.uuid) | (_db.Match.player_b_uuid == player.uuid))
-            .join(_db.Round, _db.Match.round_uuid == _db.Round.uuid)
-            .all()
-        )
-        knockout_count = sum(1 for m in all_player_matches if _is_elimination_round(m.round.name if m.round else ""))
+        knockout_count = _get_knockout_count(session, player.uuid)
         elo_str = (
             f" [Elo: {pr.rating:.2f} | {_ordinal(rank)} of {total_rated}"
             f" | {pr.match_count} Swiss, {knockout_count} KO]"
@@ -763,18 +769,25 @@ def update_ratings():
 
 
 # ---------------------------------------------------------------------------
-# Command: player-ratings
+# Command: leaderboard
 # ---------------------------------------------------------------------------
 
 
-@cli.command("player-ratings")
+@cli.command("leaderboard")
 @click.option("--top", "top_n", default=25, show_default=True, help="Number of players to show.")
-def player_ratings(top_n):
+@click.option("--name", "filter_name", default=None, help="Filter by player name (partial, case-insensitive).")
+def leaderboard(top_n, filter_name):
     """Show the Elo rating leaderboard.
 
-    Displays the top N players sorted by rating. The match count shows how
+    Displays the top N players sorted by rating. The Swiss match count shows how
     many Swiss matches a player has played — a higher count means a more
-    reliable rating.
+    reliable rating. The KO count shows knockout matches played.
+
+    Use --name to search for specific players by name:
+
+    \b
+      uv run main.py leaderboard --name "MK_"
+      uv run main.py leaderboard --name "MK_" --top 50
 
     Run update-ratings first to generate or refresh the ratings.
     """
@@ -782,22 +795,37 @@ def player_ratings(top_n):
     Session = _db.make_session_factory(engine)
 
     with Session() as session:
-        results = (
+        query = (
             session.query(_db.PlayerRating)
             .join(_db.Player, _db.PlayerRating.player_uuid == _db.Player.uuid)
             .order_by(_db.PlayerRating.rating.desc())
-            .limit(top_n)
-            .all()
         )
+        if filter_name:
+            query = query.filter(_db.Player.name.ilike(f"%{filter_name}%"))
+        else:
+            query = query.limit(top_n)
+
+        results = query.all()
 
         if not results:
-            click.echo("No ratings found. Run 'uv run main.py update-ratings' first.")
+            if filter_name:
+                click.echo(f"No rated players found matching '{filter_name}'.")
+            else:
+                click.echo("No ratings found. Run 'uv run main.py update-ratings' first.")
             return
 
         total_rated = session.query(_db.PlayerRating).count()
-        click.echo(f"Elo Leaderboard — top {min(top_n, len(results))} of {total_rated} rated players\n")
-        for i, pr in enumerate(results, 1):
-            click.echo(f"  {i:3}. {pr.player.name:<30} {pr.rating:7.2f}  ({pr.match_count} matches)")
+        if filter_name:
+            header = f"Elo Leaderboard — {len(results)} player(s) matching '{filter_name}' of {total_rated} rated"
+        else:
+            header = f"Elo Leaderboard — top {min(top_n, len(results))} of {total_rated} rated players"
+        click.echo(header + "\n")
+
+        # Compute global rank for each result
+        for pr in results:
+            rank = session.query(_db.PlayerRating).filter(_db.PlayerRating.rating > pr.rating).count() + 1
+            ko = _get_knockout_count(session, pr.player_uuid)
+            click.echo(f"  {rank:3}. {pr.player.name:<30} {pr.rating:7.2f}  ({pr.match_count} Swiss, {ko} KO)")
 
 
 # ---------------------------------------------------------------------------

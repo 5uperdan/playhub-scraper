@@ -204,25 +204,26 @@ Ratings are **always recalculated from scratch** across the full match history. 
 
 ---
 
-### `player-ratings [--top <n>]`
+### `leaderboard [--top <n>] [--name <filter>]`
 
-Prints the Elo rating leaderboard, sorted from highest to lowest. Defaults to 25 players; use `--top` to change this.
+Prints the Elo rating leaderboard, sorted from highest to lowest. Defaults to 25 players; use `--top` to change this. Use `--name` to filter by player name — when filtering, all matching players are shown (the `--top` limit is ignored) and their global rank is displayed.
 
 ```bash
-uv run main.py player-ratings
-uv run main.py player-ratings --top 50
+uv run main.py leaderboard
+uv run main.py leaderboard --top 50
+uv run main.py leaderboard --name "MK_"
 ```
 
 Example output:
 ```
 Elo Leaderboard — top 25 of 312 rated players
 
-    1. Pluto                           1223.41  (18 matches)
-    2. Minnie                          1187.05  (22 matches)
-    3. Mickey                          1104.37  (14 matches)
+    1. Pluto                           1223.41  (18 Swiss, 5 KO)
+    2. Minnie                          1187.05  (22 Swiss, 3 KO)
+    3. Mickey                          1104.37  (14 Swiss, 3 KO)
 ```
 
-The **match count** column is a reliability indicator — the more Swiss matches a player has played, the more their rating reflects real performance. Treat ratings for players with only a handful of matches with caution.
+The **Swiss match count** is a reliability indicator — the more Swiss matches a player has played, the more their rating reflects real performance. Treat ratings for players with only a handful of matches with caution.
 
 ---
 
@@ -327,7 +328,7 @@ Where `result` is 1 for a win, 0 for a loss, and 0 for a draw. **K=32** means th
 
 **Swiss rounds** (Round 1, Round 2, etc.) use standard Elo: a win gains points, a loss loses points. Draws have no effect on ratings.
 
-**Knockout rounds** also affect ratings, but through the zero-sum distribution mechanism described below rather than direct win/loss Elo transfer. In short, everyone at the tournament except the winner ends up losing a small amount of Elo from the knockout phase. Making the top cut reduces that loss — players who were eliminated in Swiss take pool deductions across every knockout round, whereas a player who reaches the Final only absorbs the deduction from that one round.
+**Knockout rounds** also affect ratings, but through the zero-sum distribution mechanism described below rather than direct win/loss Elo transfer. The net effect depends on how far you go: players who win multiple knockout rounds can easily gain more from those wins than they lose through pool deductions, while players eliminated early in the top cut or not at all will typically lose a small amount. Players eliminated in Swiss absorb pool deductions across every knockout round without any offsetting wins, so they tend to lose the most from this phase.
 
 ### Knockout rounds — zero-sum distribution
 
