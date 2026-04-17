@@ -379,7 +379,9 @@ def import_set_championship(filter_name, replace):
 
             existing = session.query(_db.Competition).filter_by(ph_event_id=event_id).first()
             if existing is not None and not replace:
-                continue
+                has_matches = session.query(_db.Match).filter_by(competition_uuid=existing.uuid).count() > 0
+                if has_matches:
+                    continue
 
             click.echo(f"  Processing event {event_id}: {ev['name']} …")
             was_new = _process_event(session, event_id, set_type_uuid=set_type_uuid, replace=replace)
