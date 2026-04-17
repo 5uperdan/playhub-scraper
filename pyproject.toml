@@ -1,11 +1,9 @@
 [project]
 dependencies = [
-  "beautifulsoup4>=4.14.3",
   "click>=8.0",
-  "lxml>=6.0.4",
-  "openpyxl>=3.1.5",
   "requests>=2.32.5",
   "sqlalchemy>=2.0",
+  "tenacity>=9.0",
 ]
 description = "Add your description here"
 name = "playhub-scraper"

@@ -6,13 +6,11 @@ Data is fetched directly from the Play Hub REST API:
 No headless browser is required.
 """
 
-import io
 import re
-from datetime import date
 from typing import Optional
 
-import openpyxl
 import requests
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 API_BASE = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2"
 HEADERS = {
@@ -34,8 +32,40 @@ HEADERS = {
 # HTTP helpers
 # ---------------------------------------------------------------------------
 
+_api_call_count = 0
 
+
+def get_api_call_count() -> int:
+    return _api_call_count
+
+
+def reset_api_call_count() -> None:
+    global _api_call_count
+    _api_call_count = 0
+
+
+def _is_transient_error(exc: BaseException) -> bool:
+    """Return True for HTTP errors that are worth retrying (5xx, connection issues)."""
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        return True
+    if isinstance(exc, requests.exceptions.Timeout):
+        return True
+    if isinstance(exc, requests.exceptions.HTTPError):
+        response = getattr(exc, "response", None)
+        if response is not None and response.status_code >= 500:
+            return True
+    return False
+
+
+@retry(
+    retry=retry_if_exception(_is_transient_error),
+    wait=wait_exponential(multiplier=1, min=2, max=30),
+    stop=stop_after_attempt(5),
+    reraise=True,
+)
 def _get(path: str, params=None) -> dict:
+    global _api_call_count
+    _api_call_count += 1
     url = API_BASE + path
     r = requests.get(url, headers=HEADERS, params=params, timeout=20)
     r.raise_for_status()
@@ -54,6 +84,90 @@ def fetch_event(event_id: int) -> dict:
 def get_event_id_from_url(url: str) -> Optional[int]:
     m = re.search(r"/events/(\d+)", url)
     return int(m.group(1)) if m else None
+
+
+_UK_COUNTRY_CODES = {"GB", "UK"}
+
+
+def fetch_events_for_template(template_id: str, progress_callback=None) -> list:
+    """
+    Paginate all events for a single event_configuration_template_id and
+    return those belonging to UK stores.
+
+    Each returned dict contains:
+      {"event_id", "name", "store_name", "store_country", "start_date",
+       "event_configuration_template"}
+
+    progress_callback, if provided, is called with (page, total_pages).
+    """
+    results = []
+    page = 1
+    total_pages = None
+
+    while True:
+        data = _get(
+            "/events/",
+            {
+                "event_configuration_template_id": template_id,
+                "page": page,
+                "page_size": 100,
+            },
+        )
+
+        count = data.get("count", 0)
+        if total_pages is None:
+            page_size = data.get("page_size", 100) or 100
+            total_pages = max(1, -(-count // page_size))  # ceiling division
+
+        if progress_callback:
+            progress_callback(page, total_pages)
+
+        for event in data.get("results", []):
+            store = event.get("store") or {}
+            country = store.get("country") or ""
+            if country not in _UK_COUNTRY_CODES:
+                continue
+            start = (event.get("start_datetime") or "")[:10]
+            results.append(
+                {
+                    "event_id": event["id"],
+                    "name": event.get("name") or f"Event {event['id']}",
+                    "store_name": store.get("name") or "Unknown",
+                    "store_country": country,
+                    "start_date": start,
+                    "event_configuration_template": template_id,
+                }
+            )
+
+        if data.get("next_page_number") is None:
+            break
+        page = data["next_page_number"]
+
+    return results
+
+
+def fetch_uk_set_championships(set_types: list, progress_callback=None) -> list:
+    """
+    Return all UK events for the given set championship types.
+
+    set_types is a list of dicts with keys {"display_name", "event_configuration_template"}.
+    Iterates through each type, fetching events server-side filtered by
+    event_configuration_template_id, then filters client-side for UK stores.
+
+    Returns a flat list of event dicts, each including "set_championship_type_template"
+    so the caller can match back to the original type.
+
+    progress_callback, if provided, is called as (label, page, total_pages).
+    """
+    results = []
+    for entry in set_types:
+        tmpl = entry["event_configuration_template"]
+        label = entry["display_name"]
+        cb = (lambda p, t, lbl=label: progress_callback(lbl, p, t)) if progress_callback else None
+        for ev in fetch_events_for_template(tmpl, cb):
+            ev["set_championship_type_template"] = tmpl
+            results.append(ev)
+    return results
 
 
 def get_venue_from_event(event: dict) -> dict:
@@ -191,48 +305,4 @@ def fetch_matches_for_round(round_id: int) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Source XLSX helpers
-# ---------------------------------------------------------------------------
-
-
-def download_google_sheet(sheet_url: str) -> bytes:
-    """Download a Google Sheet as XLSX bytes, auto-converting share URLs."""
-    m = re.search(r"/d/([a-zA-Z0-9_-]+)", sheet_url)
-    export_url = f"https://docs.google.com/spreadsheets/d/{m.group(1)}/export?format=xlsx" if m else sheet_url
-    r = requests.get(export_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
-    r.raise_for_status()
-    return r.content
-
-
-def extract_playhub_links_from_xlsx(xlsx_bytes: bytes) -> list:
-    """
-    Return deduplicated Play Hub event URLs from column F of all 'Week*' sheets
-    in the workbook, excluding rows whose date is in the future.
-    """
-    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes))
-    seen: set = set()
-    links: list = []
-    today = date.today()
-
-    for sheet_name in wb.sheetnames:
-        if not sheet_name.lower().startswith("week"):
-            continue
-        ws = wb[sheet_name]
-        for row in ws.iter_rows(min_row=1):
-            date_cell = row[0]
-            if not hasattr(date_cell.value, "strftime"):
-                continue
-            event_date = date_cell.value.date() if hasattr(date_cell.value, "date") else date_cell.value
-            if event_date > today:
-                continue
-            if len(row) <= 5:
-                continue
-            f_cell = row[5]
-            if not f_cell.hyperlink:
-                continue
-            url = f_cell.hyperlink.target.strip()
-            if url and url not in seen:
-                seen.add(url)
-                links.append(url)
-
-    return links
+# Rounds and matches

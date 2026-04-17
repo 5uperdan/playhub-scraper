@@ -17,19 +17,19 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Process all source files
+      - name: Register set championship types
+        # Add one line per set championship season.
+        # Use any event URL from that season — the tool extracts the template UUID automatically.
         run: |
-          shopt -s nullglob
-          files=(sources/*.xlsx)
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No source files found in sources/ — nothing to process."
-            exit 1
-          fi
-          for f in "${files[@]}"; do
-            filename=$(basename "$f")
-            echo "Processing $filename..."
-            uv run main.py update-from-source "$filename"
-          done
+          uv run main.py add-set-championship-type \
+            --url "https://tcg.ravensburgerplay.com/events/275408" \
+            --name "Whispers in the Well"
+          uv run main.py add-set-championship-type \
+            --url "https://tcg.ravensburgerplay.com/events/440043" \
+            --name "Winterspell"
+
+      - name: Import all UK set championship events
+        run: uv run main.py import-set-championship
 
       - name: Compute Elo ratings
         run: uv run main.py update-ratings

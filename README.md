@@ -1,6 +1,6 @@
 # playhub-scraper
 
-A tool for collecting and exploring Disney Lorcana Set Championship results from [Play Hub](https://tcg.ravensburgerplay.com). It scrapes match-level data (players, rounds, scores, standings) and stores it in a local database, which you can then explore through a web interface or query via a command-line tool.
+A tool for collecting and exploring Disney Lorcana Set Championship results from [Play Hub](https://tcg.ravensburgerplay.com). It fetches match-level data (players, rounds, scores, standings) directly from the Play Hub API and stores it in a local database, which you can then explore through a web interface or query via a command-line tool.
 
 **[Open the web interface →](https://5uperdan.github.io/playhub-scraper/)**
 
@@ -25,7 +25,7 @@ To use it, you first need a `playhub.db` database file. There are two ways to ge
 
 ### Option A — No Python required but untested (via GitHub Actions)
 
-Forking creates your own copy of this repository under your GitHub account, including all the source data files and an automated workflow that builds the database for you. You can do this entirely from the GitHub website or mobile app — no terminal needed.
+Forking creates your own copy of this repository under your GitHub account, including an automated workflow that builds the database for you. You can do this entirely from the GitHub website or mobile app — no terminal needed.
 
 1. Click **Fork** at the top-right of this repository on GitHub (you'll need a free GitHub account)
 2. In your fork, go to **Settings → Actions → General** and ensure Actions are enabled (forks sometimes have them disabled by default)
@@ -34,6 +34,8 @@ Forking creates your own copy of this repository under your GitHub account, incl
 5. Wait for the run to complete (usually a few minutes) — a green tick means success
 6. Click into the completed run, scroll to **Artifacts**, and download `playhub-db` — unzip it to get `playhub.db`
 7. Visit the [web interface](https://5uperdan.github.io/playhub-scraper/), upload the file, and explore
+
+**Adding a new set championship season:** When a new season is released, edit `.github/workflows/generate-db.yml` in your fork (you can do this directly on GitHub) and add an `add-set-championship-type` call for the new season. Use any event URL from that season — the tool fetches it to extract the internal template UUID. Then re-run the workflow.
 
 ### Option B — Generate the database locally (requires Python)
 
@@ -51,49 +53,106 @@ Then open [http://localhost:8000](http://localhost:8000) in your browser.
 
 ---
 
-## CLI and advanced usage
+## CLI quick start
 
-The CLI is for adding new data sources (Google Sheets containing Play Hub event links), building and updating the database, and querying it from the terminal.
+The CLI fetches all data directly from the Play Hub API. No Google Sheets or file downloads needed.
 
 ### Requirements
 
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
 
-### `add-source <google-sheet-url>`
-
-Downloads a Google Sheet (in XLSX format) and saves it to the `sources/` folder, registering it in the database.
+### Fresh setup
 
 ```bash
-uv run main.py add-source "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID"
+# Register each set championship season (once per season, using any event from that season)
+uv run main.py add-set-championship-type \
+  --url "https://tcg.ravensburgerplay.com/events/199050" \
+  --name "Fabled"
+
+uv run main.py add-set-championship-type \
+  --url "https://tcg.ravensburgerplay.com/events/275408" \
+  --name "Whispers in the Well"
+
+uv run main.py add-set-championship-type \
+  --url "https://tcg.ravensburgerplay.com/events/440043" \
+  --name "Winterspell"
+
+# Import all UK events for all registered seasons
+uv run main.py import-set-championship
+
+# Compute Elo ratings
+uv run main.py update-ratings
+
+# (Optional) Backtest the win-prediction model
+uv run main.py run-backtest
 ```
 
-The URL can be any Google Sheets share URL or direct export URL.
+### Staying up to date
+
+```bash
+# Check for any new events not yet in the database
+uv run main.py discover-set-championships
+
+# Import any missing events
+uv run main.py import-set-championship
+
+# Refresh ratings
+uv run main.py update-ratings
+```
+
+> **Note:** If you have an existing `playhub.db` from before this version of the tool, delete it and start fresh — the database schema has changed and the old file is not compatible.
 
 ---
 
-### `update-from-source <source-file-name> [--replace]`
+## CLI reference
 
-Reads a saved source file from `sources/`, visits every Play Hub event link found in it, and populates the database with:
+### `add-set-championship-type --url <event-url> --name <display-name>`
 
-- Venue details (name, Play Hub store UUID)
-- Competition details (name, date, player count)
-- Players and their display names
-- Every match in every round, with scores
-- Final standings per player per competition
+Registers a new set championship season in the database. Pass any Play Hub event URL from that season — the tool fetches it to extract the internal `event_configuration_template` UUID that identifies all events for that season. This UUID is stored and used by `import-set-championship` and `discover-set-championships` to find UK events.
 
-**Update mode (default):** Additive and idempotent. New competitions are inserted; existing ones are updated (scores, standings, player names) without removing any data. Safe to run on a new source file covering the same events — new competitions are added and existing data is refreshed.
+Run this once per season before importing.
 
 ```bash
-uv run main.py update-from-source source_20260414T120000.xlsx
+uv run main.py add-set-championship-type \
+  --url "https://tcg.ravensburgerplay.com/events/275408" \
+  --name "Whispers in the Well"
 ```
 
-**Replace mode (`--replace`):** For each competition found in the source, all existing match and standings records are deleted and re-scraped from scratch. Player, venue, and round records are never deleted, so a player's full history is preserved through their UUID. Use this when you want a clean re-scrape of data you suspect is stale or partial.
+---
+
+### `import-set-championship [--name <filter>] [--replace]`
+
+Discovers and imports all UK set championship events for each registered season. For each season, the Play Hub API is queried and any events not already in the database are fetched and stored.
 
 ```bash
-uv run main.py update-from-source source_20260414T120000.xlsx --replace
+# Import everything not yet in the database
+uv run main.py import-set-championship
+
+# Limit to one season (partial, case-insensitive name match)
+uv run main.py import-set-championship --name "Whispers"
+
+# Re-scrape match and standings data for already-imported events
+uv run main.py import-set-championship --replace
 ```
 
-**Updating player names:** Both modes always update the stored name to the latest value seen for each player's internal ID. Because matches reference players by internal UUID rather than name, all historical match data remains correct even after a name change.
+**Update mode (default):** Additive and idempotent. Already-imported competitions are skipped. Safe to run repeatedly.
+
+**Replace mode (`--replace`):** For each competition discovered, all existing match and standings records are deleted and re-scraped from scratch. Player, venue, and round records are never deleted, so a player's full history is preserved through their UUID. Use this when you suspect data is stale or partial.
+
+After importing new data, run `update-ratings` to refresh Elo ratings.
+
+---
+
+### `discover-set-championships [--name <filter>]`
+
+Shows which UK set championship events are already in the database and which are not. Useful for checking whether any events have been missed before running `import-set-championship`.
+
+```bash
+uv run main.py discover-set-championships
+
+# Check only one season
+uv run main.py discover-set-championships --name "Winterspell"
+```
 
 ---
 
@@ -135,13 +194,13 @@ Players who have no history in the local database are listed by name with a `(no
 
 ### `update-ratings`
 
-Computes Elo ratings for all players from scratch and stores them in the database. Always run this after importing new data with `update-from-source` — a reminder will appear in the output of that command whenever new competition data was added.
+Computes Elo ratings for all players from scratch and stores them in the database. Run this after importing new data with `import-set-championship`.
 
 ```bash
 uv run main.py update-ratings
 ```
 
-Ratings are **always recalculated from scratch** across the full match history. There is no incremental update — this ensures results are always deterministic and consistent regardless of which order sources were imported. After running, the top 10 leaderboard is printed automatically.
+Ratings are **always recalculated from scratch** across the full match history. There is no incremental update — this ensures results are always deterministic and consistent regardless of the order events were imported. After running, the top 10 leaderboard is printed automatically.
 
 ---
 
@@ -163,7 +222,7 @@ Elo Leaderboard — top 25 of 312 rated players
     3. Mickey                          1104.37  (14 matches)
 ```
 
-The **Swiss matches** column is a reliability indicator — the more Swiss matches a player has played, the more their rating reflects real performance. Treat ratings for players with only a handful of matches with caution.
+The **match count** column is a reliability indicator — the more Swiss matches a player has played, the more their rating reflects real performance. Treat ratings for players with only a handful of matches with caution.
 
 ---
 
@@ -229,11 +288,11 @@ Example output:
 
 | Table | Key columns |
 |---|---|
-| `sources` | `uuid` (PK), `file_name`, `processed_on` |
-| `venues` | `ph_uuid` (PK), `name`, `first_source_uuid` (FK) |
-| `players` | `uuid` (PK), `ph_user_id`, `name`, `first_source_uuid` (FK) |
+| `set_championship_types` | `uuid` (PK), `display_name`, `event_configuration_template` (unique) |
+| `venues` | `ph_uuid` (PK), `name` |
+| `players` | `uuid` (PK), `ph_user_id`, `name` |
 | `rounds` | `uuid` (PK), `name` (unique, e.g. "Round 1", "Top 8") |
-| `competitions` | `uuid` (PK), `ph_event_id`, `name`, `venue_uuid` (FK), `start_date`, `attended_player_count` |
+| `competitions` | `uuid` (PK), `ph_event_id`, `name`, `venue_uuid` (FK), `start_date`, `attended_player_count`, `set_championship_type_uuid` (FK, nullable) |
 | `matches` | `uuid` (PK), `player_a_uuid` (FK), `player_b_uuid` (FK), `player_a_score`, `player_b_score`, `winning_player_uuid` (FK, NULL = draw), `competition_uuid` (FK), `round_uuid` (FK) |
 | `competition_results` | `competition_uuid` + `player_uuid` (composite PK), `position` |
 | `player_ratings` | `player_uuid` (PK, FK), `rating`, `match_count`, `last_recalculated_at` |
@@ -317,7 +376,7 @@ Player display names on Play Hub can be changed by the user at any time. The dat
 
 Similarly, store/venue names can change. Venues are keyed by their Play Hub store UUID, not their name, so a renamed venue remains a single record with all its historical competitions intact.
 
-Every run of `update-from-source` (in either mode) updates the stored name to the latest value seen for each player and venue. This means current display names are always shown, even for older records. There is currently no mechanism to preserve a full name-change history (nor any interest in doing so).
+Every run of `import-set-championship` (in either mode) updates the stored name to the latest value seen for each player and venue. This means current display names are always shown, even for older records. There is currently no mechanism to preserve a full name-change history (nor any interest in doing so).
 
 ### Byes
 

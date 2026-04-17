@@ -35,17 +35,16 @@ class Base(DeclarativeBase):
     pass
 
 
-class Source(Base):
-    """A downloaded Google Sheet XLSX file used as a data source."""
+class SetChampionshipType(Base):
+    """A set championship season, identified by its Play Hub event_configuration_template UUID."""
 
-    __tablename__ = "sources"
+    __tablename__ = "set_championship_types"
 
     uuid = Column(String, primary_key=True, default=new_uuid)
-    file_name = Column(String, nullable=False)
-    processed_on = Column(DateTime, nullable=True)
+    display_name = Column(String, nullable=False)
+    event_configuration_template = Column(String, nullable=False, unique=True)
 
-    venues = relationship("Venue", back_populates="first_source")
-    players = relationship("Player", back_populates="first_source")
+    competitions = relationship("Competition", back_populates="set_championship_type")
 
 
 class Venue(Base):
@@ -55,9 +54,7 @@ class Venue(Base):
 
     ph_uuid = Column(String, primary_key=True)
     name = Column(String, nullable=False)
-    first_source_uuid = Column(String, ForeignKey("sources.uuid"), nullable=False)
 
-    first_source = relationship("Source", back_populates="venues")
     competitions = relationship("Competition", back_populates="venue")
 
 
@@ -76,9 +73,7 @@ class Player(Base):
     uuid = Column(String, primary_key=True, default=new_uuid)
     ph_user_id = Column(Integer, nullable=True, unique=True)
     name = Column(String, nullable=False)
-    first_source_uuid = Column(String, ForeignKey("sources.uuid"), nullable=False)
 
-    first_source = relationship("Source", back_populates="players")
     matches_as_a = relationship("Match", foreign_keys="Match.player_a_uuid", back_populates="player_a")
     matches_as_b = relationship("Match", foreign_keys="Match.player_b_uuid", back_populates="player_b")
     match_wins = relationship("Match", foreign_keys="Match.winning_player_uuid", back_populates="winning_player")
@@ -108,8 +103,10 @@ class Competition(Base):
     venue_uuid = Column(String, ForeignKey("venues.ph_uuid"), nullable=False)
     start_date = Column(String, nullable=False)
     attended_player_count = Column(Integer, nullable=True)
+    set_championship_type_uuid = Column(String, ForeignKey("set_championship_types.uuid"), nullable=True)
 
     venue = relationship("Venue", back_populates="competitions")
+    set_championship_type = relationship("SetChampionshipType", back_populates="competitions")
     matches = relationship("Match", back_populates="competition")
     results = relationship("CompetitionResult", back_populates="competition")
 
