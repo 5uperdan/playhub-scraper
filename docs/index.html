@@ -456,6 +456,7 @@
             <button class="tab-btn" data-tab="players">Players</button>
             <button class="tab-btn" data-tab="leaderboard">Leaderboard</button>
             <button class="tab-btn" data-tab="accuracy">Prediction Accuracy</button>
+            <button class="tab-btn" data-tab="tournament">Tournament Report</button>
         </div>
 
         <!-- Competitions tab -->
@@ -515,138 +516,162 @@
         <div id="tab-accuracy" class="tab-content">
             <div id="accuracy-content"></div>
         </div>
-    </div>
 
-    <!-- sql.js: SQLite compiled to WebAssembly, runs entirely in-browser -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
-    <script>
-        // ═══════════════════════════════════════════════════════════
-        //  sql.js bootstrap
-        // ═══════════════════════════════════════════════════════════
-        let SQL = null;
-        let db = null;
+        <!-- Tournament Report tab -->
+        <div id="tab-tournament" class="tab-content">
+            <div style="max-width:640px;margin-bottom:1.5rem">
+                <p style="color:#64748b;font-size:0.9rem;margin-bottom:1rem">
+                    Enter a Play Hub event URL to see the full match history for every registered player.
+                    Players not yet in your database are listed by name only.
+                </p>
+                <div class="controls" style="margin-bottom:0.5rem">
+                    <input id="tr-url" type="text" placeholder="https://tcg.ravensburgerplay.com/events/12345"
+                        autocomplete="off" style="max-width:none;flex:1">
+                    <button id="tr-btn"
+                        style="padding:0.5rem 1rem;background:#2563eb;color:#fff;border:none;border-radius:6px;font:inherit;font-size:0.9rem;cursor:pointer;white-space:nowrap;transition:background 0.15s">Load</button>
+                </div>
+                <div id="tr-status" style="font-size:0.85rem;color:#64748b;min-height:1.4rem"></div>
+                <div id="tr-copy-row" style="display:none;margin-top:0.75rem">
+                    <button id="tr-copy-btn"
+                        style="padding:0.4rem 0.875rem;background:#fff;color:#1e293b;border:1px solid #cbd5e1;border-radius:6px;font:inherit;font-size:0.85rem;cursor:pointer;transition:background 0.15s">Copy
+                        all to clipboard</button>
+                    <span id="tr-copy-status" style="font-size:0.8rem;color:#64748b;margin-left:0.75rem"></span>
+                </div>
+            </div>
+            <div id="tr-results" class="player-list"></div>
+        </div>
 
-        initSqlJs({
-            // Point at the CDN for the companion WASM binary
-            locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${f}`
-        }).then(sql => {
-            SQL = sql;
-        }).catch(() => {
-            showError('Failed to load sql.js. Check your internet connection and refresh.');
-        });
+        <!-- sql.js: SQLite compiled to WebAssembly, runs entirely in-browser -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
+        <script>
+            // ═══════════════════════════════════════════════════════════
+            //  sql.js bootstrap
+            // ═══════════════════════════════════════════════════════════
+            let SQL = null;
+            let db = null;
 
-        // ═══════════════════════════════════════════════════════════
-        //  Query helper — returns array of plain objects
-        // ═══════════════════════════════════════════════════════════
-        function query(sql, params = []) {
-            const result = db.exec(sql, params);
-            if (!result.length) return [];
-            const { columns, values } = result[0];
-            return values.map(row =>
-                Object.fromEntries(columns.map((col, i) => [col, row[i]]))
-            );
-        }
-
-        // ═══════════════════════════════════════════════════════════
-        //  Database loading
-        // ═══════════════════════════════════════════════════════════
-        function loadDatabase(file) {
-            if (!file) return;
-            if (!SQL) { showError('sql.js is still loading — please try again in a moment.'); return; }
-
-            const reader = new FileReader();
-            reader.onload = e => {
-                try {
-                    const bytes = new Uint8Array(e.target.result);
-                    if (db) db.close();
-                    db = new SQL.Database(bytes);
-                    // Sanity-check: must have a competitions table
-                    const tables = query(
-                        "SELECT name FROM sqlite_master WHERE type='table' AND name='competitions'"
-                    );
-                    if (!tables.length) throw new Error('Not a playhub.db file');
-                    showApp();
-                } catch (err) {
-                    showError('Could not open this file. Make sure it is a valid playhub.db generated by the CLI.');
-                }
-            };
-            reader.readAsArrayBuffer(file);
-        }
-
-        function showApp() {
-            document.getElementById('upload-error').style.display = 'none';
-            document.getElementById('upload-screen').style.display = 'none';
-            document.getElementById('app').style.display = 'block';
-            renderCompetitions();
-        }
-
-        function showUploadScreen() {
-            if (db) { db.close(); db = null; }
-            document.getElementById('file-input').value = '';
-            document.getElementById('upload-error').style.display = 'none';
-            document.getElementById('app').style.display = 'none';
-            document.getElementById('upload-screen').style.display = '';
-        }
-
-        function showError(msg) {
-            const el = document.getElementById('upload-error');
-            el.textContent = msg;
-            el.style.display = '';
-        }
-
-        // ═══════════════════════════════════════════════════════════
-        //  File picker events (click + drag-and-drop)
-        // ═══════════════════════════════════════════════════════════
-        const dropZone = document.getElementById('drop-zone');
-        const fileInput = document.getElementById('file-input');
-
-        dropZone.addEventListener('click', () => fileInput.click());
-        fileInput.addEventListener('change', e => loadDatabase(e.target.files[0]));
-
-        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-        dropZone.addEventListener('drop', e => {
-            e.preventDefault();
-            dropZone.classList.remove('drag-over');
-            const file = e.dataTransfer.files[0];
-            if (file) loadDatabase(file);
-        });
-
-        document.getElementById('change-db-btn').addEventListener('click', showUploadScreen);
-
-        // ═══════════════════════════════════════════════════════════
-        //  Tab switching
-        // ═══════════════════════════════════════════════════════════
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const tab = btn.dataset.tab;
-                document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
-                document.querySelectorAll('.tab-content').forEach(c => {
-                    c.classList.toggle('active', c.id === `tab-${tab}`);
-                });
-                if (tab === 'competitions') renderCompetitions();
-                if (tab === 'players') renderPlayers();
-                if (tab === 'leaderboard') renderLeaderboard();
-                if (tab === 'accuracy') renderAccuracy();
+            initSqlJs({
+                // Point at the CDN for the companion WASM binary
+                locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${f}`
+            }).then(sql => {
+                SQL = sql;
+            }).catch(() => {
+                showError('Failed to load sql.js. Check your internet connection and refresh.');
             });
-        });
 
-        // ═══════════════════════════════════════════════════════════
-        //  Competitions tab
-        // ═══════════════════════════════════════════════════════════
-        let compFilter = '';
-        const compFilterInput = document.getElementById('comp-filter');
+            // ═══════════════════════════════════════════════════════════
+            //  Query helper — returns array of plain objects
+            // ═══════════════════════════════════════════════════════════
+            function query(sql, params = []) {
+                const result = db.exec(sql, params);
+                if (!result.length) return [];
+                const { columns, values } = result[0];
+                return values.map(row =>
+                    Object.fromEntries(columns.map((col, i) => [col, row[i]]))
+                );
+            }
 
-        compFilterInput.addEventListener('input', () => {
-            compFilter = compFilterInput.value.trim();
-            renderCompetitions();
-        });
+            // ═══════════════════════════════════════════════════════════
+            //  Database loading
+            // ═══════════════════════════════════════════════════════════
+            function loadDatabase(file) {
+                if (!file) return;
+                if (!SQL) { showError('sql.js is still loading — please try again in a moment.'); return; }
 
-        function renderCompetitions() {
-            const pattern = `%${compFilter.toLowerCase()}%`;
+                const reader = new FileReader();
+                reader.onload = e => {
+                    try {
+                        const bytes = new Uint8Array(e.target.result);
+                        if (db) db.close();
+                        db = new SQL.Database(bytes);
+                        // Sanity-check: must have a competitions table
+                        const tables = query(
+                            "SELECT name FROM sqlite_master WHERE type='table' AND name='competitions'"
+                        );
+                        if (!tables.length) throw new Error('Not a playhub.db file');
+                        showApp();
+                    } catch (err) {
+                        showError('Could not open this file. Make sure it is a valid playhub.db generated by the CLI.');
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            }
 
-            // Subquery for winner avoids fan-out if multiple players share position 1
-            const rows = query(`
+            function showApp() {
+                document.getElementById('upload-error').style.display = 'none';
+                document.getElementById('upload-screen').style.display = 'none';
+                document.getElementById('app').style.display = 'block';
+                renderCompetitions();
+            }
+
+            function showUploadScreen() {
+                if (db) { db.close(); db = null; }
+                document.getElementById('file-input').value = '';
+                document.getElementById('upload-error').style.display = 'none';
+                document.getElementById('app').style.display = 'none';
+                document.getElementById('upload-screen').style.display = '';
+            }
+
+            function showError(msg) {
+                const el = document.getElementById('upload-error');
+                el.textContent = msg;
+                el.style.display = '';
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            //  File picker events (click + drag-and-drop)
+            // ═══════════════════════════════════════════════════════════
+            const dropZone = document.getElementById('drop-zone');
+            const fileInput = document.getElementById('file-input');
+
+            dropZone.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', e => loadDatabase(e.target.files[0]));
+
+            dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+            dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+            dropZone.addEventListener('drop', e => {
+                e.preventDefault();
+                dropZone.classList.remove('drag-over');
+                const file = e.dataTransfer.files[0];
+                if (file) loadDatabase(file);
+            });
+
+            document.getElementById('change-db-btn').addEventListener('click', showUploadScreen);
+
+            // ═══════════════════════════════════════════════════════════
+            //  Tab switching
+            // ═══════════════════════════════════════════════════════════
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const tab = btn.dataset.tab;
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+                    document.querySelectorAll('.tab-content').forEach(c => {
+                        c.classList.toggle('active', c.id === `tab-${tab}`);
+                    });
+                    if (tab === 'competitions') renderCompetitions();
+                    if (tab === 'players') renderPlayers();
+                    if (tab === 'leaderboard') renderLeaderboard();
+                    if (tab === 'accuracy') renderAccuracy();
+                    // Tournament Report re-renders only when Load is clicked, not on tab switch
+                });
+            });
+
+            // ═══════════════════════════════════════════════════════════
+            //  Competitions tab
+            // ═══════════════════════════════════════════════════════════
+            let compFilter = '';
+            const compFilterInput = document.getElementById('comp-filter');
+
+            compFilterInput.addEventListener('input', () => {
+                compFilter = compFilterInput.value.trim();
+                renderCompetitions();
+            });
+
+            function renderCompetitions() {
+                const pattern = `%${compFilter.toLowerCase()}%`;
+
+                // Subquery for winner avoids fan-out if multiple players share position 1
+                const rows = query(`
     SELECT
       c.uuid,
       c.name,
@@ -666,17 +691,17 @@
     ORDER BY c.start_date ASC, c.name ASC
   `, [pattern, pattern]);
 
-            const tbody = document.getElementById('comp-tbody');
-            const countEl = document.getElementById('comp-count');
+                const tbody = document.getElementById('comp-tbody');
+                const countEl = document.getElementById('comp-count');
 
-            if (!rows.length) {
-                tbody.innerHTML = `<tr><td colspan="5" class="empty">No competitions found</td></tr>`;
-                countEl.textContent = '';
-                return;
-            }
+                if (!rows.length) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="empty">No competitions found</td></tr>`;
+                    countEl.textContent = '';
+                    return;
+                }
 
-            countEl.textContent = `${rows.length} result${rows.length !== 1 ? 's' : ''}`;
-            tbody.innerHTML = rows.map(r => `
+                countEl.textContent = `${rows.length} result${rows.length !== 1 ? 's' : ''}`;
+                tbody.innerHTML = rows.map(r => `
     <tr>
       <td class="muted" style="white-space:nowrap">${esc(r.start_date) || '—'}</td>
       <td>${esc(r.name)}</td>
@@ -685,43 +710,43 @@
       <td>${esc(r.winner_name) || '<span class="muted">—</span>'}</td>
     </tr>
   `).join('');
-        }
-
-        // ═══════════════════════════════════════════════════════════
-        //  Players tab
-        // ═══════════════════════════════════════════════════════════
-        let playerFilter = '';
-        const playerFilterInput = document.getElementById('player-filter');
-
-        playerFilterInput.addEventListener('input', () => {
-            playerFilter = playerFilterInput.value.trim();
-            renderPlayers();
-        });
-
-        function renderPlayers() {
-            const list = document.getElementById('player-list');
-            const countEl = document.getElementById('player-count');
-
-            if (playerFilter.length < 2) {
-                list.innerHTML = `<div class="empty">Type at least 2 characters to search</div>`;
-                countEl.textContent = '';
-                return;
             }
 
-            const pattern = `%${playerFilter.toLowerCase()}%`;
-            const rows = query(
-                `SELECT uuid, name FROM players WHERE LOWER(name) LIKE ? ORDER BY name`,
-                [pattern]
-            );
+            // ═══════════════════════════════════════════════════════════
+            //  Players tab
+            // ═══════════════════════════════════════════════════════════
+            let playerFilter = '';
+            const playerFilterInput = document.getElementById('player-filter');
 
-            if (!rows.length) {
-                list.innerHTML = `<div class="empty">No players found</div>`;
-                countEl.textContent = '';
-                return;
-            }
+            playerFilterInput.addEventListener('input', () => {
+                playerFilter = playerFilterInput.value.trim();
+                renderPlayers();
+            });
 
-            countEl.textContent = `${rows.length} result${rows.length !== 1 ? 's' : ''}`;
-            list.innerHTML = rows.map(r => `
+            function renderPlayers() {
+                const list = document.getElementById('player-list');
+                const countEl = document.getElementById('player-count');
+
+                if (playerFilter.length < 2) {
+                    list.innerHTML = `<div class="empty">Type at least 2 characters to search</div>`;
+                    countEl.textContent = '';
+                    return;
+                }
+
+                const pattern = `%${playerFilter.toLowerCase()}%`;
+                const rows = query(
+                    `SELECT uuid, name FROM players WHERE LOWER(name) LIKE ? ORDER BY name`,
+                    [pattern]
+                );
+
+                if (!rows.length) {
+                    list.innerHTML = `<div class="empty">No players found</div>`;
+                    countEl.textContent = '';
+                    return;
+                }
+
+                countEl.textContent = `${rows.length} result${rows.length !== 1 ? 's' : ''}`;
+                list.innerHTML = rows.map(r => `
     <div class="player-card" data-uuid="${esc(r.uuid)}">
       <div class="player-card-header" onclick="togglePlayer(this)">
         <span class="player-name">${esc(r.name)}</span>
@@ -732,145 +757,47 @@
       </div>
     </div>
   `).join('');
-        }
-
-        function togglePlayer(header) {
-            const card = header.closest('.player-card');
-            const isOpen = card.classList.toggle('open');
-            if (isOpen) renderPlayerDetail(card.dataset.uuid);
-        }
-
-        function renderPlayerDetail(playerUuid) {
-            const bodyEl = document.getElementById(`pbody-${playerUuid}`);
-
-            // All competitions this player entered, ordered by date
-            const competitions = query(`
-    SELECT
-      c.uuid,
-      c.name,
-      c.start_date,
-      v.name AS venue_name,
-      cr.position
-    FROM competition_results cr
-    JOIN competitions c ON c.uuid = cr.competition_uuid
-    LEFT JOIN venues v ON c.venue_uuid = v.ph_uuid
-    WHERE cr.player_uuid = ?
-    ORDER BY c.start_date ASC
-  `, [playerUuid]);
-
-            if (!competitions.length) {
-                bodyEl.innerHTML = `<div class="empty">No competition history</div>`;
-                return;
             }
 
-            const sections = competitions.map(comp => {
-                // All matches for this player in this competition
-                const matches = query(`
-      SELECT
-        m.player_a_uuid,
-        m.player_b_uuid,
-        m.player_a_score,
-        m.player_b_score,
-        m.winning_player_uuid,
-        r.name  AS round_name,
-        pa.name AS player_a_name,
-        pb.name AS player_b_name
-      FROM matches m
-      JOIN rounds  r  ON r.uuid  = m.round_uuid
-      JOIN players pa ON pa.uuid = m.player_a_uuid
-      JOIN players pb ON pb.uuid = m.player_b_uuid
-      WHERE m.competition_uuid = ?
-        AND (m.player_a_uuid = ? OR m.player_b_uuid = ?)
-    `, [comp.uuid, playerUuid, playerUuid]);
+            function togglePlayer(header) {
+                const card = header.closest('.player-card');
+                const isOpen = card.classList.toggle('open');
+                if (isOpen) renderPlayerDetail(card.dataset.uuid);
+            }
 
-                // Sort: Swiss rounds ascending, then elimination rounds (Top 8 → Top 4 → Top 2)
-                matches.sort((a, b) => compareRounds(a.round_name, b.round_name));
+            function renderPlayerDetail(playerUuid) {
+                const bodyEl = document.getElementById(`pbody-${playerUuid}`);
+                renderPlayerDetailInto(playerUuid, bodyEl);
+            }
 
-                const posText = comp.position != null ? ` · Finished: ${ordinal(comp.position)}` : '';
-                const meta = [
-                    comp.start_date,
-                    comp.venue_name,
-                ].filter(Boolean).join(' · ') + posText;
+            // ═══════════════════════════════════════════════════════════
+            //  Leaderboard tab
+            // ═══════════════════════════════════════════════════════════
+            let lbFilter = '';
+            const lbFilterInput = document.getElementById('lb-filter');
 
-                const matchRows = matches.map(m => {
-                    const isA = m.player_a_uuid === playerUuid;
-                    const myScore = isA ? m.player_a_score : m.player_b_score;
-                    const oppScore = isA ? m.player_b_score : m.player_a_score;
-                    const oppName = isA ? m.player_b_name : m.player_a_name;
-
-                    let result, cls;
-                    if (m.winning_player_uuid === null) {
-                        result = 'Draw'; cls = 'draw';
-                    } else if (m.winning_player_uuid === playerUuid) {
-                        result = 'Win'; cls = 'win';
-                    } else {
-                        result = 'Loss'; cls = 'loss';
-                    }
-
-                    return `
-        <tr>
-          <td style="white-space:nowrap">${esc(m.round_name)}</td>
-          <td>${esc(oppName)}</td>
-          <td style="text-align:center;white-space:nowrap">${myScore ?? '—'} – ${oppScore ?? '—'}</td>
-          <td><span class="badge ${cls}">${result}</span></td>
-        </tr>`;
-                }).join('');
-
-                const matchTable = matches.length
-                    ? `<div class="nested-table-wrap">
-           <table>
-             <thead>
-               <tr>
-                 <th>Round</th>
-                 <th>Opponent</th>
-                 <th style="text-align:center">Score</th>
-                 <th>Result</th>
-               </tr>
-             </thead>
-             <tbody>${matchRows}</tbody>
-           </table>
-         </div>`
-                    : `<div class="empty" style="padding:0.5rem 0;text-align:left">No match records</div>`;
-
-                return `
-      <div class="comp-section">
-        <div class="comp-section-title">${esc(comp.name)}</div>
-        <div class="comp-section-meta">${esc(meta)}</div>
-        ${matchTable}
-      </div>`;
+            lbFilterInput.addEventListener('input', () => {
+                lbFilter = lbFilterInput.value.trim();
+                renderLeaderboard();
             });
 
-            bodyEl.innerHTML = sections.join('');
-        }
+            function renderLeaderboard() {
+                const tbody = document.getElementById('lb-tbody');
+                const countEl = document.getElementById('lb-count');
 
-        // ═══════════════════════════════════════════════════════════
-        //  Leaderboard tab
-        // ═══════════════════════════════════════════════════════════
-        let lbFilter = '';
-        const lbFilterInput = document.getElementById('lb-filter');
+                // Check whether the player_ratings table exists (db may pre-date this feature)
+                const tableExists = query(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='player_ratings'"
+                ).length > 0;
 
-        lbFilterInput.addEventListener('input', () => {
-            lbFilter = lbFilterInput.value.trim();
-            renderLeaderboard();
-        });
+                if (!tableExists) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="empty">No ratings data found. Run <code>uv run main.py update-ratings</code> and re-upload your database.</td></tr>`;
+                    countEl.textContent = '';
+                    return;
+                }
 
-        function renderLeaderboard() {
-            const tbody = document.getElementById('lb-tbody');
-            const countEl = document.getElementById('lb-count');
-
-            // Check whether the player_ratings table exists (db may pre-date this feature)
-            const tableExists = query(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='player_ratings'"
-            ).length > 0;
-
-            if (!tableExists) {
-                tbody.innerHTML = `<tr><td colspan="5" class="empty">No ratings data found. Run <code>uv run main.py update-ratings</code> and re-upload your database.</td></tr>`;
-                countEl.textContent = '';
-                return;
-            }
-
-            // Fetch all rated players, join to get names, sorted by rating desc
-            const allRows = query(`
+                // Fetch all rated players, join to get names, sorted by rating desc
+                const allRows = query(`
     SELECT pr.rating, pr.match_count AS swiss_count, p.name, p.uuid,
       (
         SELECT COUNT(*)
@@ -884,29 +811,29 @@
     ORDER BY pr.rating DESC
   `);
 
-            if (!allRows.length) {
-                tbody.innerHTML = `<tr><td colspan="5" class="empty">No ratings found. Run <code>uv run main.py update-ratings</code> and re-upload your database.</td></tr>`;
-                countEl.textContent = '';
-                return;
-            }
+                if (!allRows.length) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="empty">No ratings found. Run <code>uv run main.py update-ratings</code> and re-upload your database.</td></tr>`;
+                    countEl.textContent = '';
+                    return;
+                }
 
-            // Apply name filter (preserving global rank numbers)
-            const pattern = lbFilter.toLowerCase();
-            const filtered = allRows
-                .map((r, i) => ({ ...r, rank: i + 1 }))
-                .filter(r => !pattern || r.name.toLowerCase().includes(pattern));
+                // Apply name filter (preserving global rank numbers)
+                const pattern = lbFilter.toLowerCase();
+                const filtered = allRows
+                    .map((r, i) => ({ ...r, rank: i + 1 }))
+                    .filter(r => !pattern || r.name.toLowerCase().includes(pattern));
 
-            if (!filtered.length) {
-                tbody.innerHTML = `<tr><td colspan="5" class="empty">No players match your filter</td></tr>`;
-                countEl.textContent = '';
-                return;
-            }
+                if (!filtered.length) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="empty">No players match your filter</td></tr>`;
+                    countEl.textContent = '';
+                    return;
+                }
 
-            countEl.textContent = pattern
-                ? `${filtered.length} of ${allRows.length} players`
-                : `${allRows.length} players`;
+                countEl.textContent = pattern
+                    ? `${filtered.length} of ${allRows.length} players`
+                    : `${allRows.length} players`;
 
-            tbody.innerHTML = filtered.map(r => `
+                tbody.innerHTML = filtered.map(r => `
     <tr>
       <td style="text-align:right;color:#94a3b8">${r.rank}</td>
       <td>${esc(r.name)}</td>
@@ -915,108 +842,108 @@
       <td style="text-align:right;color:#94a3b8">${r.ko_count}</td>
     </tr>
   `).join('');
-        }
-
-        // ═══════════════════════════════════════════════════════════
-        //  Prediction Accuracy tab
-        // ═══════════════════════════════════════════════════════════
-        function renderAccuracy() {
-            const container = document.getElementById('accuracy-content');
-
-            const tableExists = query(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='backtest_summary'"
-            ).length > 0;
-
-            if (!tableExists) {
-                container.innerHTML = `<div class="empty" style="padding:3rem">No backtest data found. Run <code>uv run main.py run-backtest</code> and re-upload your database.</div>`;
-                return;
             }
 
-            const summary = query('SELECT total_matches, brier_score FROM backtest_summary WHERE id=1');
-            if (!summary.length) {
-                container.innerHTML = `<div class="empty" style="padding:3rem">No backtest data found. Run <code>uv run main.py run-backtest</code> and re-upload your database.</div>`;
-                return;
-            }
+            // ═══════════════════════════════════════════════════════════
+            //  Prediction Accuracy tab
+            // ═══════════════════════════════════════════════════════════
+            function renderAccuracy() {
+                const container = document.getElementById('accuracy-content');
 
-            const { total_matches, brier_score } = summary[0];
-            const buckets = query('SELECT bucket_min, match_count, actual_wins FROM backtest_buckets ORDER BY bucket_min');
-            const experience = query('SELECT tier_label, tier_min, match_count, actual_wins, sum_predicted FROM backtest_experience ORDER BY tier_min');
+                const tableExists = query(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='backtest_summary'"
+                ).length > 0;
 
-            // ── SVG calibration chart ──
-            const svgW = 440, svgH = 380;
-            const mL = 65, mR = 25, mT = 25, mB = 55;
-            const plotW = svgW - mL - mR;
-            const plotH = svgH - mT - mB;
+                if (!tableExists) {
+                    container.innerHTML = `<div class="empty" style="padding:3rem">No backtest data found. Run <code>uv run main.py run-backtest</code> and re-upload your database.</div>`;
+                    return;
+                }
 
-            function xPos(p) { return mL + (p - 0.5) / 0.5 * plotW; }
-            function yPos(w) { return mT + plotH * (1 - w); }
+                const summary = query('SELECT total_matches, brier_score FROM backtest_summary WHERE id=1');
+                if (!summary.length) {
+                    container.innerHTML = `<div class="empty" style="padding:3rem">No backtest data found. Run <code>uv run main.py run-backtest</code> and re-upload your database.</div>`;
+                    return;
+                }
 
-            const maxCount = Math.max(...buckets.map(b => b.match_count), 1);
+                const { total_matches, brier_score } = summary[0];
+                const buckets = query('SELECT bucket_min, match_count, actual_wins FROM backtest_buckets ORDER BY bucket_min');
+                const experience = query('SELECT tier_label, tier_min, match_count, actual_wins, sum_predicted FROM backtest_experience ORDER BY tier_min');
 
-            // Grid lines and axis labels
-            let gridLines = '';
-            for (let i = 0; i <= 5; i++) {
-                const frac = i / 5;
-                const px = 0.5 + frac * 0.5;
-                const gx = xPos(px);
-                const gy = yPos(frac);
-                gridLines += `<line x1="${gx}" y1="${mT}" x2="${gx}" y2="${mT + plotH}" stroke="#e2e8f0" stroke-width="1"/>`;
-                gridLines += `<line x1="${mL}" y1="${gy}" x2="${mL + plotW}" y2="${gy}" stroke="#e2e8f0" stroke-width="1"/>`;
-                gridLines += `<text x="${gx}" y="${mT + plotH + 18}" text-anchor="middle" font-size="11" fill="#64748b">${Math.round(px * 100)}%</text>`;
-                gridLines += `<text x="${mL - 8}" y="${gy + 4}" text-anchor="end" font-size="11" fill="#64748b">${Math.round(frac * 100)}%</text>`;
-            }
+                // ── SVG calibration chart ──
+                const svgW = 440, svgH = 380;
+                const mL = 65, mR = 25, mT = 25, mB = 55;
+                const plotW = svgW - mL - mR;
+                const plotH = svgH - mT - mB;
 
-            // Perfect calibration diagonal
-            const perfLine = `<line x1="${xPos(0.5)}" y1="${yPos(0.5)}" x2="${xPos(1.0)}" y2="${yPos(1.0)}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,4"/>`;
+                function xPos(p) { return mL + (p - 0.5) / 0.5 * plotW; }
+                function yPos(w) { return mT + plotH * (1 - w); }
 
-            // Data points (sized by match count, coloured by direction of error)
-            let dots = '';
-            for (const b of buckets) {
-                const midProb = b.bucket_min + 0.025;
-                const actualRate = b.actual_wins / b.match_count;
-                const cx = xPos(midProb);
-                const cy = yPos(actualRate);
-                const r = 5 + Math.sqrt(b.match_count / maxCount) * 18;
-                const over = actualRate >= midProb;
-                const fill = over ? '#3b82f6' : '#f97316';
-                const stroke = over ? '#1d4ed8' : '#c2410c';
-                const bucketLabel = `${Math.round(b.bucket_min * 100)}–${Math.round((b.bucket_min + 0.05) * 100)}%`;
-                dots += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="${fill}" fill-opacity="0.75" stroke="${stroke}" stroke-width="1.5"><title>${bucketLabel} predicted → ${(actualRate * 100).toFixed(1)}% actual (${b.match_count} matches)</title></circle>`;
-            }
+                const maxCount = Math.max(...buckets.map(b => b.match_count), 1);
 
-            // Axis labels
-            const axisLabels = `
+                // Grid lines and axis labels
+                let gridLines = '';
+                for (let i = 0; i <= 5; i++) {
+                    const frac = i / 5;
+                    const px = 0.5 + frac * 0.5;
+                    const gx = xPos(px);
+                    const gy = yPos(frac);
+                    gridLines += `<line x1="${gx}" y1="${mT}" x2="${gx}" y2="${mT + plotH}" stroke="#e2e8f0" stroke-width="1"/>`;
+                    gridLines += `<line x1="${mL}" y1="${gy}" x2="${mL + plotW}" y2="${gy}" stroke="#e2e8f0" stroke-width="1"/>`;
+                    gridLines += `<text x="${gx}" y="${mT + plotH + 18}" text-anchor="middle" font-size="11" fill="#64748b">${Math.round(px * 100)}%</text>`;
+                    gridLines += `<text x="${mL - 8}" y="${gy + 4}" text-anchor="end" font-size="11" fill="#64748b">${Math.round(frac * 100)}%</text>`;
+                }
+
+                // Perfect calibration diagonal
+                const perfLine = `<line x1="${xPos(0.5)}" y1="${yPos(0.5)}" x2="${xPos(1.0)}" y2="${yPos(1.0)}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,4"/>`;
+
+                // Data points (sized by match count, coloured by direction of error)
+                let dots = '';
+                for (const b of buckets) {
+                    const midProb = b.bucket_min + 0.025;
+                    const actualRate = b.actual_wins / b.match_count;
+                    const cx = xPos(midProb);
+                    const cy = yPos(actualRate);
+                    const r = 5 + Math.sqrt(b.match_count / maxCount) * 18;
+                    const over = actualRate >= midProb;
+                    const fill = over ? '#3b82f6' : '#f97316';
+                    const stroke = over ? '#1d4ed8' : '#c2410c';
+                    const bucketLabel = `${Math.round(b.bucket_min * 100)}–${Math.round((b.bucket_min + 0.05) * 100)}%`;
+                    dots += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="${fill}" fill-opacity="0.75" stroke="${stroke}" stroke-width="1.5"><title>${bucketLabel} predicted → ${(actualRate * 100).toFixed(1)}% actual (${b.match_count} matches)</title></circle>`;
+                }
+
+                // Axis labels
+                const axisLabels = `
                 <text x="${mL + plotW / 2}" y="${svgH - 8}" text-anchor="middle" font-size="12" fill="#475569">Predicted win probability</text>
                 <text x="${mL - 48}" y="${mT + plotH / 2}" text-anchor="middle" font-size="12" fill="#475569" transform="rotate(-90,${mL - 48},${mT + plotH / 2})">Actual win rate</text>`;
 
-            const svg = `<svg viewBox="0 0 ${svgW} ${svgH}" style="width:100%;max-width:${svgW}px;display:block">${gridLines}${perfLine}${dots}${axisLabels}</svg>`;
+                const svg = `<svg viewBox="0 0 ${svgW} ${svgH}" style="width:100%;max-width:${svgW}px;display:block">${gridLines}${perfLine}${dots}${axisLabels}</svg>`;
 
-            const legend = `<div style="display:flex;gap:1.5rem;flex-wrap:wrap;font-size:0.8rem;color:#64748b;margin:0.5rem 0 1.25rem">
+                const legend = `<div style="display:flex;gap:1.5rem;flex-wrap:wrap;font-size:0.8rem;color:#64748b;margin:0.5rem 0 1.25rem">
                 <span><svg width="12" height="12" style="vertical-align:middle;margin-right:4px"><circle cx="6" cy="6" r="6" fill="#3b82f6" fill-opacity="0.75"/></svg>Actual &gt; predicted</span>
                 <span><svg width="12" height="12" style="vertical-align:middle;margin-right:4px"><circle cx="6" cy="6" r="6" fill="#f97316" fill-opacity="0.75"/></svg>Actual &lt; predicted</span>
                 <span><svg width="22" height="12" style="vertical-align:middle;margin-right:4px"><line x1="0" y1="6" x2="22" y2="6" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,3"/></svg>Perfect calibration</span>
                 <span>Dot size ∝ match count</span>
             </div>`;
 
-            // ── Experience table ──
-            let expRows = '';
-            for (const e of experience) {
-                if (e.match_count === 0) continue;
-                const avgPred = e.sum_predicted / e.match_count;
-                const actualRate = e.actual_wins / e.match_count;
-                const error = actualRate - avgPred;
-                const sign = error >= 0 ? '+' : '';
-                const errColour = error >= 0 ? '#166534' : '#991b1b';
-                expRows += `<tr>
+                // ── Experience table ──
+                let expRows = '';
+                for (const e of experience) {
+                    if (e.match_count === 0) continue;
+                    const avgPred = e.sum_predicted / e.match_count;
+                    const actualRate = e.actual_wins / e.match_count;
+                    const error = actualRate - avgPred;
+                    const sign = error >= 0 ? '+' : '';
+                    const errColour = error >= 0 ? '#166534' : '#991b1b';
+                    expRows += `<tr>
                     <td>${esc(e.tier_label)}</td>
                     <td style="text-align:right">${e.match_count}</td>
                     <td style="text-align:right;font-variant-numeric:tabular-nums">${(avgPred * 100).toFixed(1)}%</td>
                     <td style="text-align:right;font-variant-numeric:tabular-nums">${(actualRate * 100).toFixed(1)}%</td>
                     <td style="text-align:right;font-variant-numeric:tabular-nums;color:${errColour}">${sign}${(error * 100).toFixed(1)}%</td>
                 </tr>`;
-            }
+                }
 
-            container.innerHTML = `
+                container.innerHTML = `
                 <div style="display:flex;gap:1.25rem;flex-wrap:wrap;margin-bottom:1.75rem">
                     <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:1rem 1.5rem">
                         <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:.05em;color:#64748b;margin-bottom:.25rem">Brier Score</div>
@@ -1047,46 +974,378 @@
                         <tbody>${expRows}</tbody>
                     </table>
                 </div>`;
-        }
+            }
 
-        // ═══════════════════════════════════════════════════════════
-        //  Round sort helpers
-        // ═══════════════════════════════════════════════════════════
-        function roundSortKey(name) {
-            const swiss = name.match(/^Round (\d+)$/);
-            if (swiss) return [0, parseInt(swiss[1], 10)];
+            // ═══════════════════════════════════════════════════════════
+            //  Round sort helpers
+            // ═══════════════════════════════════════════════════════════
+            function roundSortKey(name) {
+                const swiss = name.match(/^Round (\d+)$/);
+                if (swiss) return [0, parseInt(swiss[1], 10)];
 
-            const elim = name.match(/^Top (\d+)$/);
-            // Negate so Top 8 (key -8) sorts before Top 4 (key -4) ascending
-            if (elim) return [1, -parseInt(elim[1], 10)];
+                const elim = name.match(/^Top (\d+)$/);
+                // Negate so Top 8 (key -8) sorts before Top 4 (key -4) ascending
+                if (elim) return [1, -parseInt(elim[1], 10)];
 
-            return [2, 0];
-        }
+                return [2, 0];
+            }
 
-        function compareRounds(a, b) {
-            const [at, an] = roundSortKey(a);
-            const [bt, bn] = roundSortKey(b);
-            return at !== bt ? at - bt : an - bn;
-        }
+            function compareRounds(a, b) {
+                const [at, an] = roundSortKey(a);
+                const [bt, bn] = roundSortKey(b);
+                return at !== bt ? at - bt : an - bn;
+            }
 
-        // ═══════════════════════════════════════════════════════════
-        //  Utilities
-        // ═══════════════════════════════════════════════════════════
-        function esc(str) {
-            if (str == null) return '';
-            return String(str)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;');
-        }
+            // ═══════════════════════════════════════════════════════════
+            //  Utilities
+            // ═══════════════════════════════════════════════════════════
+            function esc(str) {
+                if (str == null) return '';
+                return String(str)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;');
+            }
 
-        function ordinal(n) {
-            const s = ['th', 'st', 'nd', 'rd'];
-            const v = n % 100;
-            return n + (s[(v - 20) % 10] || s[v] || s[0]);
-        }
-    </script>
+            function ordinal(n) {
+                const s = ['th', 'st', 'nd', 'rd'];
+                const v = n % 100;
+                return n + (s[(v - 20) % 10] || s[v] || s[0]);
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            //  Tournament Report tab
+            // ═══════════════════════════════════════════════════════════
+            const PH_API_BASE = 'https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2';
+            const CORS_PROXY = 'https://corsproxy.io/?url=';
+
+            function phFetch(path) {
+                const url = CORS_PROXY + encodeURIComponent(PH_API_BASE + path);
+                return fetch(url, {
+                    headers: {
+                        'x-game-slug': 'disney-lorcana',
+                        'Accept': 'application/json',
+                    }
+                });
+            }
+
+            function trStatus(msg, isError = false) {
+                const el = document.getElementById('tr-status');
+                el.textContent = msg;
+                el.style.color = isError ? '#dc2626' : '#64748b';
+            }
+
+            async function fetchAllRegistrations(eventId) {
+                let page = 1;
+                const all = [];
+                while (true) {
+                    const res = await phFetch(`/events/${eventId}/registrations/?page_size=100&page=${page}`);
+                    if (!res.ok) throw new Error(`API returned ${res.status}`);
+                    const data = await res.json();
+                    const results = data.results ?? [];
+                    all.push(...results);
+                    if (!data.next_page_number) break;
+                    page = data.next_page_number;
+                    trStatus(`Fetching registrations… (${all.length} so far)`);
+                }
+                return all;
+            }
+
+            document.getElementById('tr-btn').addEventListener('click', async () => {
+                const urlVal = document.getElementById('tr-url').value.trim();
+                const match = urlVal.match(/\/events\/(\d+)/);
+                if (!match) {
+                    trStatus('Could not find an event ID in that URL.', true);
+                    return;
+                }
+                const eventId = match[1];
+                const resultsEl = document.getElementById('tr-results');
+                resultsEl.innerHTML = '';
+                trStatus('Fetching registrations…');
+                document.getElementById('tr-btn').disabled = true;
+
+                let registrations;
+                try {
+                    registrations = await fetchAllRegistrations(eventId);
+                } catch (err) {
+                    trStatus(`Failed to fetch registrations: ${err.message}`, true);
+                    document.getElementById('tr-btn').disabled = false;
+                    return;
+                }
+
+                if (!registrations.length) {
+                    trStatus('No registrations found for this event.');
+                    document.getElementById('tr-btn').disabled = false;
+                    return;
+                }
+
+                trStatus(`${registrations.length} players registered. Looking up histories…`);
+
+                const cards = registrations.map(reg => {
+                    const user = reg.user ?? {};
+                    const phUserId = user.id ?? null;
+                    const displayName = reg.best_identifier ?? user.best_identifier ?? 'Unknown';
+
+                    // Look up by Play Hub user ID first, then by exact name
+                    let playerRow = null;
+                    if (phUserId != null) {
+                        const rows = query('SELECT uuid, name FROM players WHERE ph_user_id = ?', [phUserId]);
+                        if (rows.length) playerRow = rows[0];
+                    }
+                    if (!playerRow) {
+                        const rows = query('SELECT uuid, name FROM players WHERE LOWER(name) = LOWER(?)', [displayName]);
+                        if (rows.length) playerRow = rows[0];
+                    }
+
+                    const inDb = playerRow != null;
+                    const name = playerRow ? playerRow.name : displayName;
+                    const uuid = playerRow ? playerRow.uuid : null;
+
+                    // Rating string if available
+                    let ratingStr = '';
+                    if (uuid) {
+                        const pr = query(`
+                        SELECT pr.rating, pr.match_count,
+                          (SELECT COUNT(*) FROM player_ratings WHERE rating > pr.rating) + 1 AS rank,
+                          (SELECT COUNT(*) FROM player_ratings) AS total
+                        FROM player_ratings pr WHERE pr.player_uuid = ?`, [uuid]);
+                        if (pr.length) {
+                            const ko = query(`
+                            SELECT COUNT(*) AS c FROM matches m
+                            JOIN rounds r ON r.uuid = m.round_uuid
+                            WHERE (m.player_a_uuid = ? OR m.player_b_uuid = ?)
+                              AND r.name LIKE 'Top %'`, [uuid, uuid]);
+                            const koCount = ko.length ? ko[0].c : 0;
+                            ratingStr = ` · Elo: ${Number(pr[0].rating).toFixed(2)} · ${ordinal(pr[0].rank)} of ${pr[0].total} · ${pr[0].match_count} Swiss, ${koCount} KO`;
+                        }
+                    }
+
+                    const bodyId = `tr-pbody-${esc(uuid ?? displayName.replace(/\W/g, '_'))}`;
+
+                    return `
+                    <div class="player-card${inDb ? '' : ' tr-unknown'}" data-uuid="${esc(uuid)}">
+                      <div class="player-card-header" onclick="trTogglePlayer(this)">
+                        <span class="player-name">${esc(name)}${ratingStr ? `<span style="font-weight:400;color:#64748b;font-size:0.85rem">${esc(ratingStr)}</span>` : ''}</span>
+                        <span class="chevron">${inDb ? '▼' : '—'}</span>
+                      </div>
+                      <div class="player-card-body" id="${bodyId}">
+                        ${inDb ? '<div class="empty">Loading…</div>' : '<div class="comp-section" style="color:#94a3b8;font-style:italic">Not found in database</div>'}
+                      </div>
+                    </div>`;
+                });
+
+                resultsEl.innerHTML = cards.join('');
+                const foundCount = registrations.filter((_, i) => {
+                    const card = resultsEl.children[i];
+                    return card && card.dataset.uuid && card.dataset.uuid !== 'null' && card.dataset.uuid !== '';
+                }).length;
+                trStatus(`${registrations.length} players · ${foundCount} found in database`);
+                document.getElementById('tr-copy-row').style.display = foundCount > 0 ? '' : 'none';
+                document.getElementById('tr-copy-status').textContent = '';
+                document.getElementById('tr-btn').disabled = false;
+            });
+
+            document.getElementById('tr-copy-btn').addEventListener('click', () => {
+                const cards = document.querySelectorAll('#tr-results .player-card');
+                const lines = [];
+                for (const card of cards) {
+                    const uuid = card.dataset.uuid;
+                    const nameEl = card.querySelector('.player-name');
+                    const rawName = nameEl ? nameEl.childNodes[0].textContent.trim() : 'Unknown';
+                    const ratingSpan = nameEl ? nameEl.querySelector('span') : null;
+                    const ratingStr = ratingSpan ? ratingSpan.textContent.trim() : '';
+                    lines.push(playerInfoText(uuid, rawName, ratingStr));
+                }
+                const text = lines.join('\n');
+                navigator.clipboard.writeText(text).then(() => {
+                    const st = document.getElementById('tr-copy-status');
+                    st.textContent = 'Copied!';
+                    setTimeout(() => st.textContent = '', 2000);
+                });
+            });
+
+            // Build a CLI-style plain-text representation of a player's history
+            function playerInfoText(playerUuid, name, ratingStr) {
+                const header = ratingStr ? `${name} [${ratingStr.replace(/^ · /, '')}]` : name;
+                const lines = [header];
+
+                if (!playerUuid || playerUuid === 'null') {
+                    lines.push('  (not found in database)');
+                    lines.push('');
+                    return lines.join('\n');
+                }
+
+                const competitions = query(`
+                    SELECT c.uuid, c.name, c.start_date, v.name AS venue_name, cr.position
+                    FROM competition_results cr
+                    JOIN competitions c ON c.uuid = cr.competition_uuid
+                    LEFT JOIN venues v ON c.venue_uuid = v.ph_uuid
+                    WHERE cr.player_uuid = ?
+                    ORDER BY c.start_date ASC`, [playerUuid]);
+
+                if (!competitions.length) {
+                    lines.push('  (no competition results recorded)');
+                    lines.push('');
+                    return lines.join('\n');
+                }
+
+                for (const comp of competitions) {
+                    const matches = query(`
+                        SELECT m.player_a_uuid, m.player_b_uuid, m.player_a_score, m.player_b_score,
+                               m.winning_player_uuid, r.name AS round_name,
+                               pa.name AS player_a_name, pb.name AS player_b_name
+                        FROM matches m
+                        JOIN rounds r ON r.uuid = m.round_uuid
+                        JOIN players pa ON pa.uuid = m.player_a_uuid
+                        JOIN players pb ON pb.uuid = m.player_b_uuid
+                        WHERE m.competition_uuid = ? AND (m.player_a_uuid = ? OR m.player_b_uuid = ?)`,
+                        [comp.uuid, playerUuid, playerUuid]);
+
+                    matches.sort((a, b) => compareRounds(a.round_name, b.round_name));
+
+                    const playerCount = comp.attended_player_count ? ` (${comp.attended_player_count} players)` : '';
+                    lines.push(`  ${comp.venue_name ?? 'Unknown Venue'}: ${comp.start_date}${playerCount}`);
+
+                    for (const m of matches) {
+                        const isA = m.player_a_uuid === playerUuid;
+                        const paName = m.player_a_name;
+                        const pbName = m.player_b_name;
+                        const paScore = m.player_a_score;
+                        const pbScore = m.player_b_score;
+                        let matchLine;
+                        if (m.winning_player_uuid === null) {
+                            matchLine = `${paName} TIE ${pbName}`;
+                        } else {
+                            matchLine = `${paName} ${paScore} - ${pbScore} ${pbName}`;
+                        }
+                        lines.push(`    ${m.round_name}: ${matchLine}`);
+                    }
+
+                    if (comp.position != null) {
+                        lines.push(`    Final position: ${comp.position}`);
+                    }
+                    lines.push('');
+                }
+
+                lines.push('');
+                return lines.join('\n');
+            }
+
+            function trTogglePlayer(header) {
+                const card = header.closest('.player-card');
+                if (!card.dataset.uuid || card.dataset.uuid === 'null' || card.dataset.uuid === '') return;
+                const isOpen = card.classList.toggle('open');
+                if (isOpen) {
+                    const bodyEl = card.querySelector('.player-card-body');
+                    renderPlayerDetailInto(card.dataset.uuid, bodyEl);
+                }
+            }
+
+            function renderPlayerDetailInto(playerUuid, bodyEl) {
+                bodyEl = bodyEl ?? document.getElementById(`pbody-${playerUuid}`);
+
+                const competitions = query(`
+                SELECT c.uuid, c.name, c.start_date, v.name AS venue_name, cr.position
+                FROM competition_results cr
+                JOIN competitions c ON c.uuid = cr.competition_uuid
+                LEFT JOIN venues v ON c.venue_uuid = v.ph_uuid
+                WHERE cr.player_uuid = ?
+                ORDER BY c.start_date ASC`, [playerUuid]);
+
+                if (!competitions.length) {
+                    bodyEl.innerHTML = '<div class="empty">No competition history</div>';
+                    return;
+                }
+
+                const sections = competitions.map(comp => {
+                    const matches = query(`
+                    SELECT m.player_a_uuid, m.player_b_uuid, m.player_a_score, m.player_b_score,
+                           m.winning_player_uuid, r.name AS round_name, pa.name AS player_a_name, pb.name AS player_b_name
+                    FROM matches m
+                    JOIN rounds r ON r.uuid = m.round_uuid
+                    JOIN players pa ON pa.uuid = m.player_a_uuid
+                    JOIN players pb ON pb.uuid = m.player_b_uuid
+                    WHERE m.competition_uuid = ? AND (m.player_a_uuid = ? OR m.player_b_uuid = ?)`,
+                        [comp.uuid, playerUuid, playerUuid]);
+
+                    matches.sort((a, b) => compareRounds(a.round_name, b.round_name));
+
+                    const posText = comp.position != null ? ` · Finished: ${ordinal(comp.position)}` : '';
+                    const meta = [comp.start_date, comp.venue_name].filter(Boolean).join(' · ') + posText;
+
+                    const matchRows = matches.map(m => {
+                        const isA = m.player_a_uuid === playerUuid;
+                        const myScore = isA ? m.player_a_score : m.player_b_score;
+                        const oppScore = isA ? m.player_b_score : m.player_a_score;
+                        const oppName = isA ? m.player_b_name : m.player_a_name;
+                        let result, cls;
+                        if (m.winning_player_uuid === null) { result = 'Draw'; cls = 'draw'; }
+                        else if (m.winning_player_uuid === playerUuid) { result = 'Win'; cls = 'win'; }
+                        else { result = 'Loss'; cls = 'loss'; }
+                        return `<tr>
+                        <td style="white-space:nowrap">${esc(m.round_name)}</td>
+                        <td>${esc(oppName)}</td>
+                        <td style="text-align:center;white-space:nowrap">${myScore ?? '—'} – ${oppScore ?? '—'}</td>
+                        <td><span class="badge ${cls}">${result}</span></td>
+                    </tr>`;
+                    }).join('');
+
+                    const matchTable = matches.length
+                        ? `<div class="nested-table-wrap"><table>
+                        <thead><tr><th>Round</th><th>Opponent</th><th style="text-align:center">Score</th><th>Result</th></tr></thead>
+                        <tbody>${matchRows}</tbody>
+                       </table></div>`
+                        : `<div class="empty" style="padding:0.5rem 0;text-align:left">No match records</div>`;
+
+                    return `<div class="comp-section">
+                    <div class="comp-section-title">${esc(comp.name)}</div>
+                    <div class="comp-section-meta">${esc(meta)}</div>
+                    ${matchTable}
+                </div>`;
+                });
+
+                bodyEl.innerHTML = sections.join('');
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            //  Round sort helpers
+            // ═══════════════════════════════════════════════════════════
+            function roundSortKey(name) {
+                const swiss = name.match(/^Round (\d+)$/);
+                if (swiss) return [0, parseInt(swiss[1], 10)];
+
+                const elim = name.match(/^Top (\d+)$/);
+                // Negate so Top 8 (key -8) sorts before Top 4 (key -4) ascending
+                if (elim) return [1, -parseInt(elim[1], 10)];
+
+                return [2, 0];
+            }
+
+            function compareRounds(a, b) {
+                const [at, an] = roundSortKey(a);
+                const [bt, bn] = roundSortKey(b);
+                return at !== bt ? at - bt : an - bn;
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            //  Utilities
+            // ═══════════════════════════════════════════════════════════
+            function esc(str) {
+                if (str == null) return '';
+                return String(str)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;');
+            }
+
+            function ordinal(n) {
+                const s = ['th', 'st', 'nd', 'rd'];
+                const v = n % 100;
+                return n + (s[(v - 20) % 10] || s[v] || s[0]);
+            }
+        </script>
 </body>
 
 </html>

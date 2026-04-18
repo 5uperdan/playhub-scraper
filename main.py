@@ -606,6 +606,7 @@ def _print_player_info(session, player):
         comp_result = next((r for r in results if r.competition_uuid == comp.uuid), None)
         if comp_result and comp_result.position is not None:
             click.echo(f"    Final position: {comp_result.position}")
+        click.echo("")
 
     click.echo("")
 
