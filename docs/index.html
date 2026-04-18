@@ -1177,7 +1177,7 @@
                 }
 
                 const competitions = query(`
-                    SELECT c.uuid, c.name, c.start_date, v.name AS venue_name, cr.position
+                    SELECT c.uuid, c.name, c.start_date, c.attended_player_count, v.name AS venue_name, cr.position
                     FROM competition_results cr
                     JOIN competitions c ON c.uuid = cr.competition_uuid
                     LEFT JOIN venues v ON c.venue_uuid = v.ph_uuid
@@ -1246,7 +1246,7 @@
                 bodyEl = bodyEl ?? document.getElementById(`pbody-${playerUuid}`);
 
                 const competitions = query(`
-                SELECT c.uuid, c.name, c.start_date, v.name AS venue_name, cr.position
+                SELECT c.uuid, c.name, c.start_date, c.attended_player_count, v.name AS venue_name, cr.position
                 FROM competition_results cr
                 JOIN competitions c ON c.uuid = cr.competition_uuid
                 LEFT JOIN venues v ON c.venue_uuid = v.ph_uuid
@@ -1272,7 +1272,8 @@
                     matches.sort((a, b) => compareRounds(a.round_name, b.round_name));
 
                     const posText = comp.position != null ? ` · Finished: ${ordinal(comp.position)}` : '';
-                    const meta = [comp.start_date, comp.venue_name].filter(Boolean).join(' · ') + posText;
+                    const countText = comp.attended_player_count != null ? ` · ${comp.attended_player_count} players` : '';
+                    const meta = [comp.start_date, comp.venue_name].filter(Boolean).join(' · ') + countText + posText;
 
                     const matchRows = matches.map(m => {
                         const isA = m.player_a_uuid === playerUuid;
