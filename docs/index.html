@@ -1052,6 +1052,9 @@
                         FROM competitions c
                         LEFT JOIN competition_results cr ON cr.competition_uuid = c.uuid
                         WHERE c.set_championship_type_uuid = ?
+                          AND EXISTS (
+                            SELECT 1 FROM matches m WHERE m.competition_uuid = c.uuid
+                          )
                     `, [st.uuid]);
                     const s = stats[0] ?? { num_events: 0, total_entries: 0, unique_players: 0 };
                     return `<tr>

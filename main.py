@@ -1278,11 +1278,14 @@ def participation_stats():
             return
 
         for st in set_types:
-            # Competitions for this type that have at least one competition_result
+            # Only competitions for this type that have at least one match recorded
             comp_uuids = [
                 row[0]
                 for row in session.query(_db.Competition.uuid)
                 .filter(_db.Competition.set_championship_type_uuid == st.uuid)
+                .filter(
+                    session.query(_db.Match.uuid).filter(_db.Match.competition_uuid == _db.Competition.uuid).exists()
+                )
                 .all()
             ]
 
