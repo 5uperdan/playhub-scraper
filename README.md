@@ -12,12 +12,13 @@ This project was fully vibe coded by Claude with not a single line of code writt
 
 ## Using the web interface
 
-The [web interface](https://5uperdan.github.io/playhub-scraper/) lets you explore competition results and player histories in your browser. It has four tabs:
+The [web interface](https://5uperdan.github.io/playhub-scraper/) lets you explore competition results and player histories in your browser. It has five tabs:
 
 - **Competitions** — browse and filter all competitions by name or venue, see player counts and winners
 - **Players** — search by name, then click a player to expand their full competition and match history
 - **Leaderboard** — browse the Elo rating leaderboard for all players, filterable by name
 - **Prediction Accuracy** — calibration chart and experience breakdown evaluating how well the Elo win predictions match real outcomes
+- **Participation** — see event counts, total entries, and unique player counts broken down by set championship type
 
 All queries run entirely in your browser against your database — no external communication is required and once the page is loaded, queries should work even when you're offline.
 
@@ -263,6 +264,24 @@ Output includes:
 - **Experience breakdown** — whether predictions are better when both players have more match history
 
 Results are stored in the database so the web interface **Prediction Accuracy** tab can display them.
+
+---
+
+### `participation-stats`
+
+Prints participation totals broken down by set championship type. For each season shows the number of events in the database, total player entries across all events, and the count of unique players who participated in at least one event.
+
+```bash
+uv run main.py participation-stats
+```
+
+Example output:
+```
+Whispers in the Well
+  Events:          189
+  Total entries:   2292
+  Unique players:  1284
+```
 
 ---
 

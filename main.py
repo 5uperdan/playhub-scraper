@@ -1248,5 +1248,66 @@ def discover_set_championships(filter_name):
         click.echo("All discovered events are already in the database.")
 
 
+# ---------------------------------------------------------------------------
+# Command: participation-stats
+# ---------------------------------------------------------------------------
+
+
+@cli.command("participation-stats")
+def participation_stats():
+    """Show participation stats for each set championship type.
+
+    For each type (e.g. Whispers, Winterspell) shows:
+      - Number of events with match data
+      - Total player entries across all events
+      - Unique players who participated in at least one event
+
+    \b
+      uv run main.py participation-stats
+    """
+    engine = _db.init_db()
+    Session = _db.make_session_factory(engine)
+
+    from sqlalchemy import func
+
+    with Session() as session:
+        set_types = session.query(_db.SetChampionshipType).order_by(_db.SetChampionshipType.display_name).all()
+
+        if not set_types:
+            click.echo("No set championship types registered.")
+            return
+
+        for st in set_types:
+            # Competitions for this type that have at least one competition_result
+            comp_uuids = [
+                row[0]
+                for row in session.query(_db.Competition.uuid)
+                .filter(_db.Competition.set_championship_type_uuid == st.uuid)
+                .all()
+            ]
+
+            if not comp_uuids:
+                click.echo(f"{st.display_name}: no events imported")
+                continue
+
+            total_entries = (
+                session.query(func.count(_db.CompetitionResult.player_uuid))
+                .filter(_db.CompetitionResult.competition_uuid.in_(comp_uuids))
+                .scalar()
+            )
+            unique_players = (
+                session.query(func.count(_db.CompetitionResult.player_uuid.distinct()))
+                .filter(_db.CompetitionResult.competition_uuid.in_(comp_uuids))
+                .scalar()
+            )
+            num_events = len(comp_uuids)
+
+            click.echo(f"{st.display_name}")
+            click.echo(f"  Events:          {num_events}")
+            click.echo(f"  Total entries:   {total_entries}")
+            click.echo(f"  Unique players:  {unique_players}")
+            click.echo("")
+
+
 if __name__ == "__main__":
     cli()

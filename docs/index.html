@@ -457,6 +457,7 @@
             <button class="tab-btn" data-tab="leaderboard">Leaderboard</button>
             <button class="tab-btn" data-tab="accuracy">Prediction Accuracy</button>
             <button class="tab-btn" data-tab="tournament">Tournament Report</button>
+            <button class="tab-btn" data-tab="participation">Participation</button>
         </div>
 
         <!-- Competitions tab -->
@@ -515,6 +516,11 @@
         <!-- Prediction Accuracy tab -->
         <div id="tab-accuracy" class="tab-content">
             <div id="accuracy-content"></div>
+        </div>
+
+        <!-- Participation tab -->
+        <div id="tab-participation" class="tab-content">
+            <div id="participation-content"></div>
         </div>
 
         <!-- Tournament Report tab -->
@@ -652,6 +658,7 @@
                     if (tab === 'players') renderPlayers();
                     if (tab === 'leaderboard') renderLeaderboard();
                     if (tab === 'accuracy') renderAccuracy();
+                    if (tab === 'participation') renderParticipation();
                     // Tournament Report re-renders only when Load is clicked, not on tab switch
                 });
             });
@@ -1012,6 +1019,61 @@
                 const s = ['th', 'st', 'nd', 'rd'];
                 const v = n % 100;
                 return n + (s[(v - 20) % 10] || s[v] || s[0]);
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            //  Participation tab
+            // ═══════════════════════════════════════════════════════════
+            function renderParticipation() {
+                const container = document.getElementById('participation-content');
+
+                const tableExists = query(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='set_championship_types'"
+                ).length > 0;
+
+                if (!tableExists) {
+                    container.innerHTML = `<div class="empty" style="padding:3rem">No set championship type data found in this database.</div>`;
+                    return;
+                }
+
+                const setTypes = query(`SELECT uuid, display_name FROM set_championship_types ORDER BY display_name`);
+
+                if (!setTypes.length) {
+                    container.innerHTML = `<div class="empty" style="padding:3rem">No set championship types registered.</div>`;
+                    return;
+                }
+
+                const rows = setTypes.map(st => {
+                    const stats = query(`
+                        SELECT
+                            COUNT(DISTINCT c.uuid) AS num_events,
+                            COUNT(cr.player_uuid) AS total_entries,
+                            COUNT(DISTINCT cr.player_uuid) AS unique_players
+                        FROM competitions c
+                        LEFT JOIN competition_results cr ON cr.competition_uuid = c.uuid
+                        WHERE c.set_championship_type_uuid = ?
+                    `, [st.uuid]);
+                    const s = stats[0] ?? { num_events: 0, total_entries: 0, unique_players: 0 };
+                    return `<tr>
+                        <td>${esc(st.display_name)}</td>
+                        <td style="text-align:right">${s.num_events}</td>
+                        <td style="text-align:right">${s.total_entries}</td>
+                        <td style="text-align:right">${s.unique_players}</td>
+                    </tr>`;
+                }).join('');
+
+                container.innerHTML = `
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr>
+                            <th>Set Championship</th>
+                            <th style="text-align:right">Events</th>
+                            <th style="text-align:right">Total Entries</th>
+                            <th style="text-align:right">Unique Players</th>
+                        </tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>`;
             }
 
             // ═══════════════════════════════════════════════════════════
