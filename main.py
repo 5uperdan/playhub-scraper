@@ -447,11 +447,11 @@ def _is_elimination_round(round_name: str) -> bool:
 
 def _compute_ratings(session) -> dict:
     """
-    Replay all matches chronologically and compute Elo ratings.
+    Replay all matches chronologically and compute Delo ratings.
 
     Rules:
-    - Swiss rounds only: standard Elo (K=32). Draws have no effect.
-    - Elimination rounds: winners gain Elo normally. The total Elo gained by
+    - Swiss rounds only: standard Delo (K=32). Draws have no effect.
+    - Elimination rounds: winners gain Delo normally. The total Delo gained by
       all winners in a knockout round is distributed as an equal loss across
       the cumulative eliminated pool (Swiss non-qualifiers + all prior knockout
       losers + this round's losers). The pool grows each round.
@@ -624,7 +624,7 @@ def _print_player_info(session, player):
         rank = session.query(_db.PlayerRating).filter(_db.PlayerRating.rating > pr.rating).count() + 1
         knockout_count = _get_knockout_count(session, player.uuid)
         elo_str = (
-            f" [Elo: {pr.rating:.2f} | {_ordinal(rank)} of {total_rated}"
+            f" [Delo: {pr.rating:.2f} | {_ordinal(rank)} of {total_rated}"
             f" | {pr.match_count} Swiss, {knockout_count} KO]"
         )
     else:
@@ -795,7 +795,7 @@ def tournament_report(url):
 
 @cli.command("update-ratings")
 def update_ratings():
-    """Recompute Elo ratings for all players from scratch and store them.
+    """Recompute Delo ratings for all players from scratch and store them.
 
     Ratings are always recalculated from the full match history — no incremental
     updates. Run this after importing new competition data with update-from-source.
@@ -872,7 +872,7 @@ def update_ratings():
 @click.option("--top", "top_n", default=25, show_default=True, help="Number of players to show.")
 @click.option("--name", "filter_name", default=None, help="Filter by player name (partial, case-insensitive).")
 def leaderboard(top_n, filter_name):
-    """Show the Elo rating leaderboard.
+    """Show the Delo rating leaderboard.
 
     Displays the top N players sorted by rating. The Swiss match count shows how
     many Swiss matches a player has played — a higher count means a more
@@ -911,9 +911,9 @@ def leaderboard(top_n, filter_name):
 
         total_rated = session.query(_db.PlayerRating).count()
         if filter_name:
-            header = f"Elo Leaderboard — {len(results)} player(s) matching '{filter_name}' of {total_rated} rated"
+            header = f"Delo Leaderboard — {len(results)} player(s) matching '{filter_name}' of {total_rated} rated"
         else:
-            header = f"Elo Leaderboard — top {min(top_n, len(results))} of {total_rated} rated players"
+            header = f"Delo Leaderboard — top {min(top_n, len(results))} of {total_rated} rated players"
         click.echo(header + "\n")
 
         # Compute global rank for each result
@@ -934,7 +934,7 @@ def leaderboard(top_n, filter_name):
 def predict_match(player1, player2):
     """Estimate win probability for a head-to-head match.
 
-    Looks up stored Elo ratings for both players and calculates expected win
+    Looks up stored Delo ratings for both players and calculates expected win
     probability from the rating difference. Players with fewer than 5 Swiss
     matches will trigger a low-confidence warning.
 
@@ -971,8 +971,8 @@ def predict_match(player1, player2):
         e2 = 1.0 - e1
 
         click.echo(f"\n  {p1.name} vs {p2.name}\n")
-        click.echo(f"  {p1.name:<30} Elo: {r1:7.2f}  Win probability: {e1 * 100:.1f}%")
-        click.echo(f"  {p2.name:<30} Elo: {r2:7.2f}  Win probability: {e2 * 100:.1f}%")
+        click.echo(f"  {p1.name:<30} Delo: {r1:7.2f}  Win probability: {e1 * 100:.1f}%")
+        click.echo(f"  {p2.name:<30} Delo: {r2:7.2f}  Win probability: {e2 * 100:.1f}%")
 
         warnings = []
         if mc1 < LOW_MATCH_THRESHOLD:
@@ -1096,7 +1096,7 @@ def _compute_backtest(session):
 
             _record(m.player_a_uuid, m.player_b_uuid, m.winning_player_uuid)
 
-            # Apply Elo update after recording
+            # Apply Delo update after recording
             winner_uuid = m.winning_player_uuid
             loser_uuid = m.player_b_uuid if m.player_a_uuid == winner_uuid else m.player_a_uuid
             ea = elo_expected(get_rating(winner_uuid), get_rating(loser_uuid))
@@ -1151,10 +1151,10 @@ def _compute_backtest(session):
 
 @cli.command("run-backtest")
 def run_backtest():
-    """Evaluate Elo win-probability predictions against historical match outcomes.
+    """Evaluate Delo win-probability predictions against historical match outcomes.
 
     Replays all matches chronologically, recording the predicted win probability
-    before each Elo update is applied (genuine out-of-sample evaluation). Both
+    before each Delo update is applied (genuine out-of-sample evaluation). Both
     Swiss and knockout decisive matches are included; draws are skipped.
 
     Results are stored in the database so the web interface can display them,
@@ -1376,7 +1376,7 @@ def discover_set_championships(filter_name):
     help="Path for the output PNG file.",
 )
 def compare_ratings(player_names, output_path):
-    """Generate a PNG chart of Elo rating history for multiple players.
+    """Generate a PNG chart of Delo rating history for multiple players.
 
     Each --player argument is matched case-insensitively (partial match).
     If a name matches multiple players, the one with most history is used.
@@ -1449,8 +1449,8 @@ def compare_ratings(player_names, output_path):
     ax.xaxis.set_major_locator(mdates.AutoDateLocator())
     fig.autofmt_xdate(rotation=35, ha="right")
 
-    ax.set_ylabel("Elo Rating", fontsize=11)
-    ax.set_title("Elo Rating History", fontsize=13, fontweight="bold", pad=12)
+    ax.set_ylabel("Delo Rating", fontsize=11)
+    ax.set_title("Delo Rating History", fontsize=13, fontweight="bold", pad=12)
     ax.legend(framealpha=0.85, fontsize=10)
     ax.grid(axis="y", color="#e2e8f0", linewidth=0.8, zorder=0)
     ax.spines[["top", "right"]].set_visible(False)

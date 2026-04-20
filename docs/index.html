@@ -504,7 +504,7 @@
                         <tr>
                             <th style="text-align:right">Rank</th>
                             <th>Player</th>
-                            <th style="text-align:right">Elo Rating</th>
+                            <th style="text-align:right">Delo Rating</th>
                             <th style="text-align:right">Swiss</th>
                             <th style="text-align:right">KO</th>
                         </tr>
@@ -528,7 +528,7 @@
         <div id="tab-compare" class="tab-content">
             <div style="max-width:640px;margin-bottom:1rem">
                 <p style="font-size:0.9rem;color:#64748b;margin-bottom:1rem">
-                    Plot Elo rating history for multiple players on one chart.
+                    Plot Delo rating history for multiple players on one chart.
                     Search for a player and click their name to add them. Up to 6 players.
                 </p>
                 <div style="position:relative;max-width:320px;margin-bottom:0.75rem">
@@ -1353,7 +1353,7 @@
                             WHERE (m.player_a_uuid = ? OR m.player_b_uuid = ?)
                               AND r.name LIKE 'Top %'`, [uuid, uuid]);
                             const koCount = ko.length ? ko[0].c : 0;
-                            ratingStr = ` · Elo: ${Number(pr[0].rating).toFixed(2)} · ${ordinal(pr[0].rank)} of ${pr[0].total} · ${pr[0].match_count} Swiss, ${koCount} KO`;
+                            ratingStr = ` · Delo: ${Number(pr[0].rating).toFixed(2)} · ${ordinal(pr[0].rank)} of ${pr[0].total} · ${pr[0].match_count} Swiss, ${koCount} KO`;
                         }
                     }
 
@@ -1494,7 +1494,7 @@
                     return;
                 }
 
-                // ── Elo history chart ──
+                // ── Delo history chart ──
                 const historyTableExists = query(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name='player_rating_history'"
                 ).length > 0;
@@ -1544,7 +1544,7 @@
                             const cx = xPos(i).toFixed(1);
                             const cy = yPos(h.rating).toFixed(1);
                             const venue = h.venue_name ?? h.comp_name;
-                            const tip = `${venue} (${h.date})\nElo: ${Number(h.rating).toFixed(2)} · ${h.match_count} matches`;
+                            const tip = `${venue} (${h.date})\nDelo: ${Number(h.rating).toFixed(2)} · ${h.match_count} matches`;
                             return `<circle cx="${cx}" cy="${cy}" r="3.5" fill="#3b82f6" stroke="#fff" stroke-width="1.5"><title>${tip}</title></circle>`;
                         }).join('');
 

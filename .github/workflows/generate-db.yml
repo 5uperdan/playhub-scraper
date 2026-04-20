@@ -31,7 +31,7 @@ jobs:
       - name: Import all UK set championship events
         run: uv run main.py import-set-championship
 
-      - name: Compute Elo ratings
+      - name: Compute Delo ratings
         run: uv run main.py update-ratings
 
       - name: Run prediction accuracy backtest

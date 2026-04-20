@@ -150,11 +150,11 @@ class CompetitionResult(Base):
 
 
 class PlayerRatingHistory(Base):
-    """Per-competition Elo snapshot, populated by the update-ratings command.
+    """Per-competition Delo snapshot, populated by the update-ratings command.
 
     One row per player per competition they participated in, capturing the
-    player's Elo rating and cumulative match count immediately after that
-    competition's matches were processed. Used for drawing Elo over time graphs.
+    player's Delo rating and cumulative match count immediately after that
+    competition's matches were processed. Used for drawing Delo over time graphs.
     """
 
     __tablename__ = "player_rating_history"
@@ -171,7 +171,7 @@ class PlayerRatingHistory(Base):
 
 
 class PlayerRating(Base):
-    """Cached Elo rating for a player, recomputed by the update-ratings command."""
+    """Cached Delo rating for a player, recomputed by the update-ratings command."""
 
     __tablename__ = "player_ratings"
 

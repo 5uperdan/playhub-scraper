@@ -15,11 +15,11 @@ This project was fully vibe coded by Claude with not a single line of code writt
 The [web interface](https://5uperdan.github.io/playhub-scraper/) lets you explore competition results and player histories in your browser. It has six tabs:
 
 - **Competitions** — browse and filter all competitions by name or venue, see player counts and winners
-- **Players** — search by name, then click a player to expand their full competition and match history, including an Elo rating chart
-- **Leaderboard** — browse the Elo rating leaderboard for all players, filterable by name
-- **Prediction Accuracy** — calibration chart and experience breakdown evaluating how well the Elo win predictions match real outcomes
+- **Players** — search by name, then click a player to expand their full competition and match history, including an Delo rating chart
+- **Leaderboard** — browse the Delo rating leaderboard for all players, filterable by name
+- **Prediction Accuracy** — calibration chart and experience breakdown evaluating how well the Delo win predictions match real outcomes
 - **Participation** — see event counts, total entries, and unique player counts broken down by set championship type
-- **Compare** — search for and add multiple players to overlay their Elo rating histories on a shared chart. Up to 6 players at once; requires a database with rating history (run `update-ratings` first)
+- **Compare** — search for and add multiple players to overlay their Delo rating histories on a shared chart. Up to 6 players at once; requires a database with rating history (run `update-ratings` first)
 
 All queries run entirely in your browser against your database — no external communication is required and once the page is loaded, queries should work even when you're offline.
 
@@ -82,7 +82,7 @@ uv run main.py add-set-championship-type \
 # Import all UK events for all registered seasons
 uv run main.py import-set-championship
 
-# Compute Elo ratings
+# Compute Delo ratings
 uv run main.py update-ratings
 
 # (Optional) Backtest the win-prediction model
@@ -141,7 +141,7 @@ uv run main.py import-set-championship --replace
 
 **Replace mode (`--replace`):** For each competition discovered, all existing match and standings records are deleted and re-scraped from scratch. Player, venue, and round records are never deleted, so a player's full history is preserved through their UUID. Use this when you suspect data is stale or partial.
 
-After importing new data, run `update-ratings` to refresh Elo ratings.
+After importing new data, run `update-ratings` to refresh Delo ratings.
 
 ---
 
@@ -160,7 +160,7 @@ uv run main.py discover-set-championships --name "Winterspell"
 
 ### `player-info <player-name>`
 
-Queries the database for a player (case-insensitive, partial match) and prints all their competition history, round-by-round match results, and final positions. If Elo ratings have been calculated, the player's rating and leaderboard rank are shown in the header.
+Queries the database for a player (case-insensitive, partial match) and prints all their competition history, round-by-round match results, and final positions. If Delo ratings have been calculated, the player's rating and leaderboard rank are shown in the header.
 
 ```bash
 uv run main.py player-info "Mickey"
@@ -168,7 +168,7 @@ uv run main.py player-info "Mickey"
 
 Example output:
 ```
-Mickey [Elo: 1104.37 | 3rd of 312 | 14 Swiss, 3 KO]
+Mickey [Delo: 1104.37 | 3rd of 312 | 14 Swiss, 3 KO]
   The Disney Store: 2026-04-05 (34 players)
     Round 1: Buzz 1 - 2 Mickey
     Round 2: Jim 0 - 2 Mickey
@@ -190,13 +190,13 @@ This works for upcoming tournaments as well as past ones: only the registration 
 uv run main.py tournament-report --url "https://tcg.ravensburgerplay.com/events/12345"
 ```
 
-Players who have no history in the local database are listed by name with a `(not found in database)` note. If Elo ratings have been calculated, each player's rating and rank will appear in their header line.
+Players who have no history in the local database are listed by name with a `(not found in database)` note. If Delo ratings have been calculated, each player's rating and rank will appear in their header line.
 
 ---
 
 ### `update-ratings`
 
-Computes Elo ratings for all players from scratch and stores them in the database. Run this after importing new data with `import-set-championship`.
+Computes Delo ratings for all players from scratch and stores them in the database. Run this after importing new data with `import-set-championship`.
 
 ```bash
 uv run main.py update-ratings
@@ -208,7 +208,7 @@ Ratings are **always recalculated from scratch** across the full match history. 
 
 ### `leaderboard [--top <n>] [--name <filter>]`
 
-Prints the Elo rating leaderboard, sorted from highest to lowest. Defaults to 25 players; use `--top` to change this. Use `--name` to filter by player name — when filtering, all matching players are shown (the `--top` limit is ignored) and their global rank is displayed.
+Prints the Delo rating leaderboard, sorted from highest to lowest. Defaults to 25 players; use `--top` to change this. Use `--name` to filter by player name — when filtering, all matching players are shown (the `--top` limit is ignored) and their global rank is displayed.
 
 ```bash
 uv run main.py leaderboard
@@ -218,7 +218,7 @@ uv run main.py leaderboard --name "MK_"
 
 Example output:
 ```
-Elo Leaderboard — top 25 of 312 rated players
+Delo Leaderboard — top 25 of 312 rated players
 
     1. Pluto                           1223.41  (18 Swiss, 5 KO)
     2. Minnie                          1187.05  (22 Swiss, 3 KO)
@@ -231,7 +231,7 @@ The **Swiss match count** is a reliability indicator — the more Swiss matches 
 
 ### `predict-match --player1 <name> --player2 <name>`
 
-Estimates win probability for a hypothetical head-to-head match based on stored Elo ratings.
+Estimates win probability for a hypothetical head-to-head match based on stored Delo ratings.
 
 ```bash
 uv run main.py predict-match --player1 "Mickey" --player2 "Pluto"
@@ -241,8 +241,8 @@ Example output:
 ```
   Mickey vs Pluto
 
-  Mickey                         Elo: 1104.37  Win probability: 36.2%
-  Pluto                          Elo: 1223.41  Win probability: 63.8%
+  Mickey                         Delo: 1104.37  Win probability: 36.2%
+  Pluto                          Delo: 1223.41  Win probability: 63.8%
 ```
 
 A warning is shown if either player has fewer than 5 Swiss matches, as their rating may not be reliable yet. Players not found in the rating table are assumed to be at the starting rating of 1000.
@@ -251,13 +251,13 @@ A warning is shown if either player has fewer than 5 Swiss matches, as their rat
 
 ### `run-backtest`
 
-Backtests Elo win-probability predictions against historical match outcomes and stores calibration data in the database. Run this after `update-ratings`.
+Backtests Delo win-probability predictions against historical match outcomes and stores calibration data in the database. Run this after `update-ratings`.
 
 ```bash
 uv run main.py run-backtest
 ```
 
-Matches are replayed chronologically. The predicted win probability is recorded *before* the corresponding Elo update is applied — this means every prediction is genuinely out-of-sample; the model hasn't yet seen the match it's predicting. Both Swiss and knockout decisive matches are included; draws are skipped.
+Matches are replayed chronologically. The predicted win probability is recorded *before* the corresponding Delo update is applied — this means every prediction is genuinely out-of-sample; the model hasn't yet seen the match it's predicting. Both Swiss and knockout decisive matches are included; draws are skipped.
 
 Output includes:
 - **Brier score** — a single-number accuracy summary (random-guess baseline = 0.2500, perfect = 0.0000; lower is better)
@@ -270,7 +270,7 @@ Results are stored in the database so the web interface **Prediction Accuracy** 
 
 ### `compare-ratings --player <name> [--player <name> ...] [--output <path>]`
 
-Generates a PNG chart of Elo rating history for multiple players on a shared graph. Each `--player` argument is matched case-insensitively as a partial name — if a name matches multiple players, the one with the most history is used. Up to 6 players can be compared at once.
+Generates a PNG chart of Delo rating history for multiple players on a shared graph. Each `--player` argument is matched case-insensitively as a partial name — if a name matches multiple players, the one with the most history is used. Up to 6 players can be compared at once.
 
 Requires rating history in the database (run `update-ratings` first).
 
@@ -339,11 +339,11 @@ Example output:
 
 ---
 
-## Elo rating system
+## Delo rating system
 
-Player ratings are computed using a customised [Elo rating system](https://en.wikipedia.org/wiki/Elo_rating_system). This estimates the relative skill level of each player based on their match history and is used to power the leaderboard and `predict-match` command.
+Player ratings are computed using a customised [Elo rating system](https://en.wikipedia.org/wiki/Elo_rating_system) (affectionately referred to as Delo- Danny's elo). This estimates the relative skill level of each player based on their match history and is used to power the leaderboard and `predict-match` command.
 
-### How Elo works
+### How Delo works
 
 Every player starts at a rating of **1000**. After each match, points are transferred from the loser to the winner. The amount transferred depends on how surprising the result was:
 
@@ -362,27 +362,27 @@ Where `result` is 1 for a win, 0 for a loss, and 0 for a draw. **K=32** means th
 
 ### Swiss and knockout rounds
 
-**Swiss rounds** (Round 1, Round 2, etc.) use standard Elo: a win gains points, a loss loses points. Draws have no effect on ratings.
+**Swiss rounds** (Round 1, Round 2, etc.) use standard Delo: a win gains points, a loss loses points. Draws have no effect on ratings.
 
-**Knockout rounds** also affect ratings, but through the zero-sum distribution mechanism described below rather than direct win/loss Elo transfer. The net effect depends on how far you go: players who win multiple knockout rounds can easily gain more from those wins than they lose through pool deductions, while players eliminated early in the top cut or not at all will typically lose a small amount. Players eliminated in Swiss absorb pool deductions across every knockout round without any offsetting wins, so they tend to lose the most from this phase.
+**Knockout rounds** also affect ratings, but through the zero-sum distribution mechanism described below rather than direct win/loss Delo transfer. The net effect depends on how far you go: players who win multiple knockout rounds can easily gain more from those wins than they lose through pool deductions, while players eliminated early in the top cut or not at all will typically lose a small amount. Players eliminated in Swiss absorb pool deductions across every knockout round without any offsetting wins, so they tend to lose the most from this phase.
 
 ### Knockout rounds — zero-sum distribution
 
-Knockout matches are **zero-sum**: winners gain Elo, but instead of the loser absorbing that loss, it is shared equally across a growing pool of eliminated players.
+Knockout matches are **zero-sum**: winners gain Delo, but instead of the loser absorbing that loss, it is shared equally across a growing pool of eliminated players.
 
 Here's how the pool works for a 32-player tournament with a Top 8 cut:
 
 1. **Before knockouts start:** The pool contains all 24 players who didn't make the top cut.
-2. **Quarterfinals (Top 8 round):** The 4 winners each gain Elo. The 4 losers join the pool — now 28 players. All 28 take an equal deduction totalling the Elo the winners gained.
-3. **Semifinals (Top 4 round):** The 2 winners gain Elo. The 2 losers join the pool — now 30 players. All 30 take an equal deduction totalling the Elo the winners gained.
-4. **Final (Top 2 round):** The winner gains Elo. The finalist joins the pool — now 31 players. All 31 take an equal deduction totalling the Elo the winner gained.
+2. **Quarterfinals (Top 8 round):** The 4 winners each gain Delo. The 4 losers join the pool — now 28 players. All 28 take an equal deduction totalling the Delo the winners gained.
+3. **Semifinals (Top 4 round):** The 2 winners gain Delo. The 2 losers join the pool — now 30 players. All 30 take an equal deduction totalling the Delo the winners gained.
+4. **Final (Top 2 round):** The winner gains Delo. The finalist joins the pool — now 31 players. All 31 take an equal deduction totalling the Delo the winner gained.
 
-The winner of the event gains a small amount of Elo; every other player at the event takes a small, equal deduction. The total Elo across the whole field is unchanged — no inflation.
+The winner of the event gains a small amount of Delo; every other player at the event takes a small, equal deduction. The total Delo across the whole field is unchanged — no inflation.
 
 This design means:
-- Making the top cut reduces your Elo losses from the knockout phase — Swiss-only players absorb pool deductions across every knockout round, while top cut players only absorb deductions from the rounds they've already been eliminated in
-- A player who finishes Swiss 4-0 and loses in the quarters will always end the event with more Elo than a player who went 0-4 at the same event
-- Every tournament is, in aggregate, a zero-sum redistribution of Elo within the field
+- Making the top cut reduces your Delo losses from the knockout phase — Swiss-only players absorb pool deductions across every knockout round, while top cut players only absorb deductions from the rounds they've already been eliminated in
+- A player who finishes Swiss 4-0 and loses in the quarters will always end the event with more Delo than a player who went 0-4 at the same event
+- Every tournament is, in aggregate, a zero-sum redistribution of Delo within the field
 
 ### Match count and reliability
 
@@ -401,7 +401,7 @@ Ratings are always computed **from scratch** across all historical data in chron
 Running `run-backtest` against the dataset gives a feel for how well the predictions hold up:
 
 - **Brier score: 0.2446** — just below the random-guess baseline of 0.2500, confirming the model adds genuine signal but not a large amount
-- **Systematic under-confidence** — in every probability bucket, players win slightly *more* often than predicted. When the model says 60%, players actually win around 67%. This suggests the Elo rating differences are real but underestimated
+- **Systematic under-confidence** — in every probability bucket, players win slightly *more* often than predicted. When the model says 60%, players actually win around 67%. This suggests the Delo rating differences are real but underestimated
 - **Data-constrained, not wrong** — 77% of all evaluated matches fall in the 50–55% bucket, because most players have short histories and their ratings cluster near 1000. The model correctly says "roughly 50/50" when it doesn't know enough; the slight positive error reflects genuine skill differences the limited data can't yet quantify
 - **Experience matters** — predictions involving at least one player with fewer than 5 Swiss matches show a larger error than predictions between more experienced players, as expected
 
