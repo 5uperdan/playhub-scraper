@@ -10,12 +10,20 @@ Usage:
 
 import re
 import sys
+from dataclasses import dataclass, field
+from datetime import date as _date
 from datetime import datetime, timezone
 
 import click
+import matplotlib
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+from sqlalchemy import func, nullslast
 
 import db as _db
 import scrape as _scrape
+
+matplotlib.use("Agg")  # non-interactive backend — no display needed
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -122,15 +130,16 @@ def _process_event(session, event_id, set_type_uuid=None, replace=False):
 
     # --- Venue ---
     venue_info = _scrape.get_venue_from_event(event)
-    if not venue_info["ph_uuid"]:
+    if not venue_info.ph_uuid:
         click.echo(f"    Warning: no venue UUID for event {event_id}, skipping")
         return False
-    venue = _get_or_create_venue(session, venue_info["ph_uuid"], venue_info["name"])
+    venue = _get_or_create_venue(session, venue_info.ph_uuid, venue_info.name)
 
     # --- Competition ---
-    comp_name = event.get("name") or f"Event {event_id}"
-    start_date = (event.get("start_datetime") or "")[:10]
-    player_count = event.get("starting_player_count")
+    comp_name = event.name or f"Event {event_id}"
+    # start_datetime is an ISO 8601 string e.g. "2026-04-18T10:49:49+00:00"; split on T to get just the date
+    start_date = (event.start_datetime or "").split("T")[0]
+    player_count = event.starting_player_count
 
     existing_comp = session.query(_db.Competition).filter_by(ph_event_id=event_id).first()
     new_data = existing_comp is None or replace
@@ -159,12 +168,8 @@ def _process_event(session, event_id, set_type_uuid=None, replace=False):
 
     reg_by_uid = {}
     for reg in registrations:
-        user = reg.get("user") or {}
-        ph_uid = user.get("id")
-        name = reg.get("best_identifier") or user.get("best_identifier") or "Unknown"
-        final_place = reg.get("final_place_in_standings")
-        player = _get_or_create_player(session, ph_uid, name)
-        reg_by_uid[ph_uid] = (player, final_place)
+        player = _get_or_create_player(session, reg.ph_user_id, reg.name)
+        reg_by_uid[reg.ph_user_id] = (player, reg.final_place)
 
     for ph_uid, (player, final_place) in reg_by_uid.items():
         existing = (
@@ -185,9 +190,11 @@ def _process_event(session, event_id, set_type_uuid=None, replace=False):
     event_rounds = _scrape.get_rounds_from_event(event)
     click.echo(f"    {len(event_rounds)} rounds to process")
 
-    for round_info in event_rounds:
-        round_name = round_info["round_name"]
-        round_id = round_info["round_id"]
+    need_start_time = bool(event_rounds) and comp.start_time is None
+
+    for i, round_info in enumerate(event_rounds):
+        round_name = round_info.round_name
+        round_id = round_info.round_id
         db_round = _get_or_create_round(session, round_name)
 
         try:
@@ -196,17 +203,23 @@ def _process_event(session, event_id, set_type_uuid=None, replace=False):
             click.echo(f"    Warning: could not fetch {round_name}: {e}")
             continue
 
+        # Extract start_time from the earliest created_at in Round 1's matches
+        if i == 0 and need_start_time:
+            timestamps = [m.created_at for m in matches if m.created_at]
+            if timestamps:
+                comp.start_time = min(timestamps)
+
         for match_data in matches:
-            pa_info = match_data["player_a"]
-            pb_info = match_data["player_b"]
+            pa_info = match_data.player_a
+            pb_info = match_data.player_b
 
-            pa = _get_or_create_player(session, pa_info["ph_user_id"], pa_info["name"])
-            pb = _get_or_create_player(session, pb_info["ph_user_id"], pb_info["name"])
+            pa = _get_or_create_player(session, pa_info.ph_user_id, pa_info.name)
+            pb = _get_or_create_player(session, pb_info.ph_user_id, pb_info.name)
 
-            winner_uid = match_data["winner_ph_user_id"]
-            if winner_uid == pa_info["ph_user_id"]:
+            winner_uid = match_data.winner_ph_user_id
+            if winner_uid == pa_info.ph_user_id:
                 winner_uuid = pa.uuid
-            elif winner_uid == pb_info["ph_user_id"]:
+            elif winner_uid == pb_info.ph_user_id:
                 winner_uuid = pb.uuid
             else:
                 winner_uuid = None
@@ -226,16 +239,16 @@ def _process_event(session, event_id, set_type_uuid=None, replace=False):
                     _db.Match(
                         player_a_uuid=pa.uuid,
                         player_b_uuid=pb.uuid,
-                        player_a_score=match_data["player_a_score"],
-                        player_b_score=match_data["player_b_score"],
+                        player_a_score=match_data.player_a_score,
+                        player_b_score=match_data.player_b_score,
                         winning_player_uuid=winner_uuid,
                         competition_uuid=comp.uuid,
                         round_uuid=db_round.uuid,
                     )
                 )
             else:
-                existing_match.player_a_score = match_data["player_a_score"]
-                existing_match.player_b_score = match_data["player_b_score"]
+                existing_match.player_a_score = match_data.player_a_score
+                existing_match.player_b_score = match_data.player_b_score
                 existing_match.winning_player_uuid = winner_uuid
 
     return new_data
@@ -278,7 +291,7 @@ def add_set_championship_type(url, display_name):
         click.echo(f"Error fetching event: {e}", err=True)
         sys.exit(1)
 
-    tmpl = event.get("event_configuration_template")
+    tmpl = event.event_configuration_template
     if not tmpl:
         click.echo("Could not find event_configuration_template in the event data.", err=True)
         sys.exit(1)
@@ -357,12 +370,15 @@ def import_set_championship(filter_name, replace):
             click.echo(f"  {label}: page {page}/{total}…", nl=False)
             click.echo("\r", nl=False)
 
-        set_type_dicts = [
-            {"display_name": st.display_name, "event_configuration_template": st.event_configuration_template}
+        set_type_infos = [
+            _scrape.SetTypeInfo(
+                display_name=st.display_name,
+                event_configuration_template=st.event_configuration_template,
+            )
             for st in set_types
         ]
         try:
-            discovered = _scrape.fetch_uk_set_championships(set_type_dicts, progress_callback=_progress)
+            discovered = _scrape.fetch_uk_set_championships(set_type_infos, progress_callback=_progress)
         except Exception as e:
             click.echo(f"Error fetching events: {e}", err=True)
             sys.exit(1)
@@ -374,9 +390,9 @@ def import_set_championship(filter_name, replace):
 
         new_data_inserted = False
         for ev in discovered:
-            event_id = ev["event_id"]
-            tmpl = ev["set_championship_type_template"]
-            set_type_uuid = tmpl_to_uuid.get(tmpl)
+            event_id = ev.event_id
+            tmpl = ev.set_championship_type_template
+            set_type_uuid = tmpl_to_uuid.get(tmpl) if tmpl else None
 
             existing = session.query(_db.Competition).filter_by(ph_event_id=event_id).first()
             if existing is not None and not replace:
@@ -384,7 +400,7 @@ def import_set_championship(filter_name, replace):
                 if has_matches:
                     continue
 
-            click.echo(f"  Processing event {event_id}: {ev['name']} …")
+            click.echo(f"  Processing event {event_id}: {ev.name} …")
             was_new = _process_event(session, event_id, set_type_uuid=set_type_uuid, replace=replace)
             if was_new:
                 new_data_inserted = True
@@ -399,6 +415,21 @@ def import_set_championship(filter_name, replace):
 # ---------------------------------------------------------------------------
 # Ratings helpers
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class RatingSnapshot:
+    competition_uuid: str
+    rating: float
+    match_count: int
+    date: str
+
+
+@dataclass
+class PlayerRatingResult:
+    rating: float
+    swiss_match_count: int
+    history: list = field(default_factory=list)  # list[RatingSnapshot]
 
 
 def _ordinal(n: int) -> str:
@@ -426,11 +457,14 @@ def _compute_ratings(session) -> dict:
       losers + this round's losers). The pool grows each round.
     - Always computed from scratch from all stored matches.
 
-    Returns {player_uuid: (rating, swiss_match_count)}.
+    Returns:
+        dict[player_uuid, PlayerRatingResult]
     """
     K = 32
     ratings = {}  # player_uuid -> float
     swiss_match_counts = {}  # player_uuid -> int
+    total_match_counts = {}  # player_uuid -> int (Swiss + KO)
+    history: list[tuple[str, RatingSnapshot]] = []
 
     def get_rating(uuid):
         return ratings.get(uuid, 1000.0)
@@ -438,7 +472,15 @@ def _compute_ratings(session) -> dict:
     def expected(ra, rb):
         return 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))
 
-    comps = session.query(_db.Competition).order_by(_db.Competition.start_date).all()
+    comps = (
+        session.query(_db.Competition)
+        .order_by(
+            _db.Competition.start_date,
+            nullslast(_db.Competition.start_time),
+            _db.Competition.ph_event_id,
+        )
+        .all()
+    )
 
     for comp in comps:
         all_matches = session.query(_db.Match).filter_by(competition_uuid=comp.uuid).all()
@@ -459,6 +501,8 @@ def _compute_ratings(session) -> dict:
             knockout_participants.add(m.player_a_uuid)
             knockout_participants.add(m.player_b_uuid)
 
+        all_participants = swiss_participants | knockout_participants
+
         # --- Swiss phase ---
         for m in swiss_matches:
             if m.winning_player_uuid is None:  # draw — skip
@@ -471,6 +515,8 @@ def _compute_ratings(session) -> dict:
             ratings[loser_uuid] = rb + K * (0 - (1 - ea))
             swiss_match_counts[winner_uuid] = swiss_match_counts.get(winner_uuid, 0) + 1
             swiss_match_counts[loser_uuid] = swiss_match_counts.get(loser_uuid, 0) + 1
+            total_match_counts[winner_uuid] = total_match_counts.get(winner_uuid, 0) + 1
+            total_match_counts[loser_uuid] = total_match_counts.get(loser_uuid, 0) + 1
 
         # --- Elimination phase ---
         # Players who didn't make the top cut start in the eliminated pool
@@ -502,6 +548,8 @@ def _compute_ratings(session) -> dict:
                 ratings[winner_uuid] = ra + gain
                 round_elo_gained += gain
                 round_losers.add(loser_uuid)
+                total_match_counts[winner_uuid] = total_match_counts.get(winner_uuid, 0) + 1
+                total_match_counts[loser_uuid] = total_match_counts.get(loser_uuid, 0) + 1
 
             # Add this round's losers to the cumulative pool
             eliminated_pool.update(round_losers)
@@ -512,8 +560,32 @@ def _compute_ratings(session) -> dict:
                 for uuid in eliminated_pool:
                     ratings[uuid] = get_rating(uuid) - loss_per_player
 
-    all_uuids = set(ratings.keys()) | set(swiss_match_counts.keys())
-    return {uuid: (ratings.get(uuid, 1000.0), swiss_match_counts.get(uuid, 0)) for uuid in all_uuids}
+        # Snapshot every participant's rating after this competition is fully processed
+        if all_participants and all_matches:
+            for uuid in all_participants:
+                history.append(
+                    (
+                        uuid,
+                        RatingSnapshot(
+                            competition_uuid=comp.uuid,
+                            rating=get_rating(uuid),
+                            match_count=total_match_counts.get(uuid, 0),
+                            date=comp.start_date,
+                        ),
+                    )
+                )
+
+    all_uuids = set(ratings.keys()) | set(swiss_match_counts.keys()) | {uuid for uuid, _ in history}
+    results = {
+        uuid: PlayerRatingResult(
+            rating=ratings.get(uuid, 1000.0),
+            swiss_match_count=swiss_match_counts.get(uuid, 0),
+        )
+        for uuid in all_uuids
+    }
+    for player_uuid, snap in history:
+        results[player_uuid].history.append(snap)
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -522,11 +594,9 @@ def _compute_ratings(session) -> dict:
 
 
 def _round_sort_key(match):
-    import re as _re
-
     name = match.round.name if match.round else ""
-    swiss = _re.match(r"Round (\d+)", name)
-    top = _re.match(r"Top (\d+)", name)
+    swiss = re.match(r"Round (\d+)", name)
+    top = re.match(r"Top (\d+)", name)
     if swiss:
         return (0, int(swiss.group(1)))
     if top:
@@ -729,33 +799,56 @@ def update_ratings():
 
     Ratings are always recalculated from the full match history — no incremental
     updates. Run this after importing new competition data with update-from-source.
+
+    Raises an error if any player has more than one competition on the same date,
+    as the processing order would be ambiguous and the ratings undefined.
     """
     engine = _db.init_db()
     Session = _db.make_session_factory(engine)
 
     with Session() as session:
+
         click.echo("Computing ratings from scratch…")
-        ratings = _compute_ratings(session)
+        results = _compute_ratings(session)
 
         now = datetime.now(timezone.utc)
-        for player_uuid, (rating, match_count) in ratings.items():
+
+        # Update final ratings
+        for player_uuid, result in results.items():
             existing = session.query(_db.PlayerRating).filter_by(player_uuid=player_uuid).first()
             if existing is None:
                 session.add(
                     _db.PlayerRating(
                         player_uuid=player_uuid,
-                        rating=rating,
-                        match_count=match_count,
+                        rating=result.rating,
+                        match_count=result.swiss_match_count,
                         last_recalculated_at=now,
                     )
                 )
             else:
-                existing.rating = rating
-                existing.match_count = match_count
+                existing.rating = result.rating
+                existing.match_count = result.swiss_match_count
                 existing.last_recalculated_at = now
 
+        # Replace rating history
+        session.query(_db.PlayerRatingHistory).delete()
+        history_count = 0
+        for player_uuid, result in results.items():
+            for snap in result.history:
+                session.add(
+                    _db.PlayerRatingHistory(
+                        player_uuid=player_uuid,
+                        competition_uuid=snap.competition_uuid,
+                        rating=snap.rating,
+                        match_count=snap.match_count,
+                        date=snap.date,
+                    )
+                )
+                history_count += 1
+
         session.commit()
-        click.echo(f"Updated ratings for {len(ratings)} players.")
+        click.echo(f"Updated ratings for {len(results)} players.")
+        click.echo(f"Stored {history_count} rating history snapshots.")
 
         top = (
             session.query(_db.PlayerRating)
@@ -766,7 +859,8 @@ def update_ratings():
         )
         click.echo("\nTop 10:")
         for i, pr in enumerate(top, 1):
-            click.echo(f"  {i:3}. {pr.player.name:<30} {pr.rating:7.2f}  ({pr.match_count} matches)")
+            ko = _get_knockout_count(session, pr.player_uuid)
+            click.echo(f"  {i:3}. {pr.player.name:<30} {pr.rating:7.2f}  ({pr.match_count} Swiss, {ko} KO)")
 
 
 # ---------------------------------------------------------------------------
@@ -859,7 +953,9 @@ def predict_match(player1, player2):
                 return None, 1000.0, 0
             player = players[0]
             pr = session.query(_db.PlayerRating).filter_by(player_uuid=player.uuid).first()
-            return player, (pr.rating if pr else 1000.0), (pr.match_count if pr else 0)
+            swiss = pr.match_count if pr else 0
+            ko = _get_knockout_count(session, player.uuid)
+            return player, (pr.rating if pr else 1000.0), swiss + ko
 
         p1, r1, mc1 = lookup(player1)
         p2, r2, mc2 = lookup(player2)
@@ -880,9 +976,9 @@ def predict_match(player1, player2):
 
         warnings = []
         if mc1 < LOW_MATCH_THRESHOLD:
-            warnings.append(f"  Warning: {p1.name} has only {mc1} Swiss match(es) — low confidence.")
+            warnings.append(f"  Warning: {p1.name} has only {mc1} match(es) — low confidence.")
         if mc2 < LOW_MATCH_THRESHOLD:
-            warnings.append(f"  Warning: {p2.name} has only {mc2} Swiss match(es) — low confidence.")
+            warnings.append(f"  Warning: {p2.name} has only {mc2} match(es) — low confidence.")
         if warnings:
             click.echo("")
             for w in warnings:
@@ -966,7 +1062,15 @@ def _compute_backtest(session):
         brier_sum += (fav_prob - actual) ** 2
         total_matches += 1
 
-    comps = session.query(_db.Competition).order_by(_db.Competition.start_date).all()
+    comps = (
+        session.query(_db.Competition)
+        .order_by(
+            _db.Competition.start_date,
+            nullslast(_db.Competition.start_time),
+            _db.Competition.ph_event_id,
+        )
+        .all()
+    )
 
     for comp in comps:
         all_matches = session.query(_db.Match).filter_by(competition_uuid=comp.uuid).all()
@@ -1216,12 +1320,15 @@ def discover_set_championships(filter_name):
             click.echo(f"  {label}: page {page}/{total}…", nl=False)
             click.echo("\r", nl=False)
 
-        set_type_dicts = [
-            {"display_name": st.display_name, "event_configuration_template": st.event_configuration_template}
+        set_type_infos = [
+            _scrape.SetTypeInfo(
+                display_name=st.display_name,
+                event_configuration_template=st.event_configuration_template,
+            )
             for st in set_types
         ]
         try:
-            events = _scrape.fetch_uk_set_championships(set_type_dicts, progress_callback=_progress)
+            events = _scrape.fetch_uk_set_championships(set_type_infos, progress_callback=_progress)
         except Exception as e:
             click.echo(f"Error fetching events: {e}", err=True)
             sys.exit(1)
@@ -1230,22 +1337,130 @@ def discover_set_championships(filter_name):
 
         known_ids = {row[0] for row in session.query(_db.Competition.ph_event_id).all() if row[0] is not None}
 
-    already_imported = sorted([e for e in events if e["event_id"] in known_ids], key=lambda e: e["start_date"])
-    not_imported = sorted([e for e in events if e["event_id"] not in known_ids], key=lambda e: e["start_date"])
+    already_imported = sorted([e for e in events if e.event_id in known_ids], key=lambda e: e.start_date)
+    not_imported = sorted([e for e in events if e.event_id not in known_ids], key=lambda e: e.start_date)
 
     if already_imported:
         click.echo(f"Already in database ({len(already_imported)}):")
         for e in already_imported:
-            click.echo(f"  {e['start_date']}  {e['store_name']:<35}  {e['name']}")
+            click.echo(f"  {e.start_date}  {e.store_name:<35}  {e.name}")
         click.echo("")
 
     if not_imported:
         click.echo(f"Not yet imported ({len(not_imported)}):")
         for e in not_imported:
-            click.echo(f"  {e['start_date']}  {e['store_name']:<35}  {e['name']}  [ID: {e['event_id']}]")
+            click.echo(f"  {e.start_date}  {e.store_name:<35}  {e.name}  [ID: {e.event_id}]")
         click.echo("\nRun 'uv run main.py import-set-championship' to import these.")
     else:
         click.echo("All discovered events are already in the database.")
+
+
+# ---------------------------------------------------------------------------
+# Command: compare-ratings
+# ---------------------------------------------------------------------------
+
+
+@cli.command("compare-ratings")
+@click.option(
+    "--player",
+    "player_names",
+    multiple=True,
+    required=True,
+    help="Player name to include (repeatable, case-insensitive partial match).",
+)
+@click.option(
+    "--output",
+    "output_path",
+    default="elo_comparison.png",
+    show_default=True,
+    help="Path for the output PNG file.",
+)
+def compare_ratings(player_names, output_path):
+    """Generate a PNG chart of Elo rating history for multiple players.
+
+    Each --player argument is matched case-insensitively (partial match).
+    If a name matches multiple players, the one with most history is used.
+    Up to 6 players can be compared.
+
+    \b
+      uv run main.py compare-ratings --player "Alice" --player "Bob"
+      uv run main.py compare-ratings --player "Alice" --player "Bob" --output chart.png
+    """
+    engine = _db.init_db()
+    Session = _db.make_session_factory(engine)
+
+    with Session() as session:
+        # Check that any history exists at all
+        if not session.query(_db.PlayerRatingHistory).first():
+            click.echo("No rating history found. Run 'uv run main.py update-ratings' first.")
+            sys.exit(1)
+
+        series = []
+        for raw_name in player_names:
+            # Find the player matching the name who has the most history entries
+            row = (
+                session.query(_db.Player, func.count(_db.PlayerRatingHistory.competition_uuid).label("cnt"))
+                .join(_db.PlayerRatingHistory, _db.PlayerRatingHistory.player_uuid == _db.Player.uuid)
+                .filter(_db.Player.name.ilike(f"%{raw_name}%"))
+                .group_by(_db.Player.uuid)
+                .order_by(func.count(_db.PlayerRatingHistory.competition_uuid).desc())
+                .first()
+            )
+            if not row:
+                player = session.query(_db.Player).filter(_db.Player.name.ilike(f"%{raw_name}%")).first()
+                if not player:
+                    click.echo(f"Player not found: {raw_name}", err=True)
+                else:
+                    click.echo(
+                        f"No rating history for {player.name}. Run 'uv run main.py update-ratings' first.",
+                        err=True,
+                    )
+                continue
+
+            player_obj, _ = row
+            pts = (
+                session.query(_db.PlayerRatingHistory)
+                .filter_by(player_uuid=player_obj.uuid)
+                .order_by(_db.PlayerRatingHistory.date)
+                .all()
+            )
+            dates = [_date.fromisoformat(pt.date) for pt in pts]
+            ratings = [pt.rating for pt in pts]
+            series.append({"name": player_obj.name, "dates": dates, "ratings": ratings})
+
+        if not series:
+            click.echo("No data to plot.")
+            sys.exit(1)
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    fig.patch.set_facecolor("#f8fafc")
+    ax.set_facecolor("#f8fafc")
+
+    # Baseline at 1000
+    all_dates = [d for s in series for d in s["dates"]]
+    ax.axhline(1000, color="#cbd5e1", linewidth=1, linestyle="--", zorder=1)
+
+    colors = ["#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#8b5cf6", "#ec4899"]
+    for i, s in enumerate(series):
+        color = colors[i % len(colors)]
+        ax.plot(s["dates"], s["ratings"], marker="o", markersize=5, linewidth=2, color=color, label=s["name"], zorder=3)
+
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+    fig.autofmt_xdate(rotation=35, ha="right")
+
+    ax.set_ylabel("Elo Rating", fontsize=11)
+    ax.set_title("Elo Rating History", fontsize=13, fontweight="bold", pad=12)
+    ax.legend(framealpha=0.85, fontsize=10)
+    ax.grid(axis="y", color="#e2e8f0", linewidth=0.8, zorder=0)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.spines[["left", "bottom"]].set_color("#cbd5e1")
+    ax.tick_params(colors="#475569")
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    click.echo(f"Chart saved to {output_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -1267,8 +1482,6 @@ def participation_stats():
     """
     engine = _db.init_db()
     Session = _db.make_session_factory(engine)
-
-    from sqlalchemy import func
 
     with Session() as session:
         set_types = session.query(_db.SetChampionshipType).order_by(_db.SetChampionshipType.display_name).all()

@@ -102,6 +102,7 @@ class Competition(Base):
     name = Column(String, nullable=False)
     venue_uuid = Column(String, ForeignKey("venues.ph_uuid"), nullable=False)
     start_date = Column(String, nullable=False)
+    start_time = Column(String, nullable=True)  # ISO 8601 datetime from first round's earliest match created_at
     attended_player_count = Column(Integer, nullable=True)
     set_championship_type_uuid = Column(String, ForeignKey("set_championship_types.uuid"), nullable=True)
 
@@ -146,6 +147,27 @@ class CompetitionResult(Base):
     player = relationship("Player", back_populates="results")
 
     __table_args__ = (UniqueConstraint("competition_uuid", "player_uuid"),)
+
+
+class PlayerRatingHistory(Base):
+    """Per-competition Elo snapshot, populated by the update-ratings command.
+
+    One row per player per competition they participated in, capturing the
+    player's Elo rating and cumulative match count immediately after that
+    competition's matches were processed. Used for drawing Elo over time graphs.
+    """
+
+    __tablename__ = "player_rating_history"
+
+    player_uuid = Column(String, ForeignKey("players.uuid"), primary_key=True)
+    competition_uuid = Column(String, ForeignKey("competitions.uuid"), primary_key=True)
+    rating = Column(Float, nullable=False)
+    match_count = Column(Integer, nullable=False)
+    # Denormalised from competition.start_date so graphs can be drawn without an extra join
+    date = Column(String, nullable=False)
+
+    player = relationship("Player")
+    competition = relationship("Competition")
 
 
 class PlayerRating(Base):

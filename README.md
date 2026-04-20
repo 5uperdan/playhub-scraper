@@ -12,13 +12,14 @@ This project was fully vibe coded by Claude with not a single line of code writt
 
 ## Using the web interface
 
-The [web interface](https://5uperdan.github.io/playhub-scraper/) lets you explore competition results and player histories in your browser. It has five tabs:
+The [web interface](https://5uperdan.github.io/playhub-scraper/) lets you explore competition results and player histories in your browser. It has six tabs:
 
 - **Competitions** — browse and filter all competitions by name or venue, see player counts and winners
-- **Players** — search by name, then click a player to expand their full competition and match history
+- **Players** — search by name, then click a player to expand their full competition and match history, including an Elo rating chart
 - **Leaderboard** — browse the Elo rating leaderboard for all players, filterable by name
 - **Prediction Accuracy** — calibration chart and experience breakdown evaluating how well the Elo win predictions match real outcomes
 - **Participation** — see event counts, total entries, and unique player counts broken down by set championship type
+- **Compare** — search for and add multiple players to overlay their Elo rating histories on a shared chart. Up to 6 players at once; requires a database with rating history (run `update-ratings` first)
 
 All queries run entirely in your browser against your database — no external communication is required and once the page is loaded, queries should work even when you're offline.
 
@@ -264,6 +265,22 @@ Output includes:
 - **Experience breakdown** — whether predictions are better when both players have more match history
 
 Results are stored in the database so the web interface **Prediction Accuracy** tab can display them.
+
+---
+
+### `compare-ratings --player <name> [--player <name> ...] [--output <path>]`
+
+Generates a PNG chart of Elo rating history for multiple players on a shared graph. Each `--player` argument is matched case-insensitively as a partial name — if a name matches multiple players, the one with the most history is used. Up to 6 players can be compared at once.
+
+Requires rating history in the database (run `update-ratings` first).
+
+```bash
+uv run main.py compare-ratings --player "Alice" --player "Bob"
+uv run main.py compare-ratings --player "Alice" --player "Bob" --player "Carol"
+uv run main.py compare-ratings --player "Alice" --player "Bob" --output my_chart.png
+```
+
+The chart is saved to `elo_comparison.png` in the current directory by default. Use `--output` to specify a different path.
 
 ---
 

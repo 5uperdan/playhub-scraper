@@ -458,6 +458,7 @@
             <button class="tab-btn" data-tab="accuracy">Prediction Accuracy</button>
             <button class="tab-btn" data-tab="tournament">Tournament Report</button>
             <button class="tab-btn" data-tab="participation">Participation</button>
+            <button class="tab-btn" data-tab="compare">Compare</button>
         </div>
 
         <!-- Competitions tab -->
@@ -521,6 +522,25 @@
         <!-- Participation tab -->
         <div id="tab-participation" class="tab-content">
             <div id="participation-content"></div>
+        </div>
+
+        <!-- Compare tab -->
+        <div id="tab-compare" class="tab-content">
+            <div style="max-width:640px;margin-bottom:1rem">
+                <p style="font-size:0.9rem;color:#64748b;margin-bottom:1rem">
+                    Plot Elo rating history for multiple players on one chart.
+                    Search for a player and click their name to add them. Up to 6 players.
+                </p>
+                <div style="position:relative;max-width:320px;margin-bottom:0.75rem">
+                    <input id="cmp-search" type="text" placeholder="Search player name…" autocomplete="off"
+                        style="width:100%;padding:0.45rem 0.65rem;border:1px solid #e2e8f0;border-radius:6px;font:inherit;font-size:0.9rem;box-sizing:border-box">
+                    <div id="cmp-suggestions"
+                        style="display:none;position:absolute;left:0;right:0;background:#fff;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 6px 6px;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,.08)">
+                    </div>
+                </div>
+                <div id="cmp-tags" style="display:flex;flex-wrap:wrap;gap:0.5rem;min-height:1.5rem"></div>
+            </div>
+            <div id="cmp-chart"></div>
         </div>
 
         <!-- Tournament Report tab -->
@@ -659,6 +679,7 @@
                     if (tab === 'leaderboard') renderLeaderboard();
                     if (tab === 'accuracy') renderAccuracy();
                     if (tab === 'participation') renderParticipation();
+                    if (tab === 'compare') { renderCmpTags(); renderCompareChart(); }
                     // Tournament Report re-renders only when Load is clicked, not on tab switch
                 });
             });
@@ -1080,6 +1101,156 @@
             }
 
             // ═══════════════════════════════════════════════════════════
+            //  Compare tab
+            // ═══════════════════════════════════════════════════════════
+            let cmpPlayers = [];
+            const CMP_COLORS = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899'];
+
+            document.getElementById('cmp-search').addEventListener('input', function () {
+                const val = this.value.trim();
+                const sugBox = document.getElementById('cmp-suggestions');
+                if (val.length < 2) { sugBox.style.display = 'none'; sugBox.innerHTML = ''; return; }
+                if (!db) { sugBox.style.display = 'none'; return; }
+                const matches = query(
+                    `SELECT uuid, name FROM players WHERE LOWER(name) LIKE ? ORDER BY name LIMIT 6`,
+                    [`%${val.toLowerCase()}%`]
+                );
+                if (!matches.length) { sugBox.style.display = 'none'; sugBox.innerHTML = ''; return; }
+                sugBox.style.display = '';
+                sugBox.innerHTML = matches.map(m =>
+                    `<div onclick="cmpAddPlayer(${JSON.stringify(m.uuid)}, ${JSON.stringify(m.name)})"
+                         style="padding:0.35rem 0.65rem;cursor:pointer;font-size:0.875rem;border-bottom:1px solid #f1f5f9"
+                         onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">${esc(m.name)}</div>`
+                ).join('');
+            });
+
+            document.addEventListener('click', e => {
+                if (!document.getElementById('cmp-search').contains(e.target) &&
+                    !document.getElementById('cmp-suggestions').contains(e.target)) {
+                    document.getElementById('cmp-suggestions').style.display = 'none';
+                }
+            });
+
+            function cmpAddPlayer(uuid, name) {
+                document.getElementById('cmp-search').value = '';
+                document.getElementById('cmp-suggestions').style.display = 'none';
+                if (cmpPlayers.find(p => p.uuid === uuid)) return;
+                if (cmpPlayers.length >= 6) return;
+                cmpPlayers.push({ uuid, name });
+                renderCmpTags();
+                renderCompareChart();
+            }
+
+            function cmpRemovePlayer(uuid) {
+                cmpPlayers = cmpPlayers.filter(p => p.uuid !== uuid);
+                renderCmpTags();
+                renderCompareChart();
+            }
+
+            function renderCmpTags() {
+                const container = document.getElementById('cmp-tags');
+                if (!cmpPlayers.length) { container.innerHTML = ''; return; }
+                container.innerHTML = cmpPlayers.map((p, i) =>
+                    `<span style="display:inline-flex;align-items:center;gap:0.4rem;background:#f8fafc;border:1px solid ${CMP_COLORS[i]};color:#1e293b;border-radius:999px;padding:0.2rem 0.6rem 0.2rem 0.5rem;font-size:0.85rem">
+                        <svg width="10" height="10" style="flex-shrink:0"><circle cx="5" cy="5" r="5" fill="${CMP_COLORS[i]}"/></svg>
+                        ${esc(p.name)}
+                        <span onclick="cmpRemovePlayer(${JSON.stringify(p.uuid)})" style="cursor:pointer;color:#94a3b8;font-size:1.1rem;line-height:1;margin-left:1px" title="Remove">×</span>
+                    </span>`
+                ).join('');
+            }
+
+            function renderCompareChart() {
+                const container = document.getElementById('cmp-chart');
+                if (!cmpPlayers.length) {
+                    container.innerHTML = '<div class="empty" style="padding:2rem">Search for players above and click their name to add them to the comparison.</div>';
+                    return;
+                }
+
+                const histTableExists = query(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='player_rating_history'"
+                ).length > 0;
+
+                if (!histTableExists) {
+                    container.innerHTML = '<div class="empty" style="padding:2rem">No rating history available. Run <code>uv run main.py update-ratings</code> and re-upload your database.</div>';
+                    return;
+                }
+
+                const allSeries = cmpPlayers.map((p, i) => {
+                    const pts = query(
+                        `SELECT date, rating FROM player_rating_history WHERE player_uuid = ? ORDER BY date ASC`,
+                        [p.uuid]
+                    );
+                    return { name: p.name, color: CMP_COLORS[i], points: pts };
+                }).filter(s => s.points.length > 0);
+
+                if (!allSeries.length) {
+                    container.innerHTML = '<div class="empty" style="padding:2rem">No rating history found for the selected players. Run <code>uv run main.py update-ratings</code> and re-upload your database.</div>';
+                    return;
+                }
+
+                const allDates = [...new Set(allSeries.flatMap(s => s.points.map(p => p.date)))].sort();
+                const dateIndex = Object.fromEntries(allDates.map((d, i) => [d, i]));
+                const n = allDates.length;
+                const allRatings = allSeries.flatMap(s => s.points.map(p => p.rating));
+
+                const svgW = 640, svgH = 280;
+                const mL = 55, mR = 20, mT = 16, mB = 36;
+                const plotW = svgW - mL - mR;
+                const plotH = svgH - mT - mB;
+                const minR = Math.min(1000, ...allRatings);
+                const maxR = Math.max(1000, ...allRatings);
+                const rPad = (maxR - minR) * 0.1 || 30;
+                const yMin = minR - rPad, yMax = maxR + rPad;
+
+                const xPos = d => mL + (n > 1 ? (dateIndex[d] / (n - 1)) * plotW : plotW / 2);
+                const yPos = r => mT + plotH * (1 - (r - yMin) / (yMax - yMin));
+
+                let svgInner = '';
+
+                // Horizontal grid lines + Y axis labels
+                for (let i = 0; i <= 4; i++) {
+                    const r = yMin + (yMax - yMin) * i / 4;
+                    const y = yPos(r).toFixed(1);
+                    svgInner += `<line x1="${mL}" y1="${y}" x2="${mL + plotW}" y2="${y}" stroke="#f1f5f9" stroke-width="1"/>`;
+                    svgInner += `<text x="${mL - 5}" y="${+y + 4}" text-anchor="end" font-size="10" fill="#94a3b8">${Math.round(r)}</text>`;
+                }
+
+                // Baseline at 1000
+                const base1000Y = yPos(1000).toFixed(1);
+                svgInner += `<line x1="${mL}" y1="${base1000Y}" x2="${mL + plotW}" y2="${base1000Y}" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,3"/>`;
+
+                // Series lines and dots
+                for (const s of allSeries) {
+                    if (s.points.length >= 2) {
+                        const pts = s.points.map(p => `${xPos(p.date).toFixed(1)},${yPos(p.rating).toFixed(1)}`).join(' ');
+                        svgInner += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>`;
+                    }
+                    for (const p of s.points) {
+                        const cx = xPos(p.date).toFixed(1);
+                        const cy = yPos(p.rating).toFixed(1);
+                        svgInner += `<circle cx="${cx}" cy="${cy}" r="3" fill="${s.color}" stroke="#fff" stroke-width="1.5"><title>${esc(s.name)}: ${p.date} \u2014 ${Number(p.rating).toFixed(2)}</title></circle>`;
+                    }
+                }
+
+                // X axis date labels
+                svgInner += `<text x="${mL}" y="${svgH - 8}" text-anchor="middle" font-size="10" fill="#94a3b8">${allDates[0]}</text>`;
+                if (n > 1) svgInner += `<text x="${mL + plotW}" y="${svgH - 8}" text-anchor="middle" font-size="10" fill="#94a3b8">${allDates[n - 1]}</text>`;
+
+                const svgEl = `<svg viewBox="0 0 ${svgW} ${svgH}" style="width:100%;max-width:${svgW}px;display:block">${svgInner}</svg>`;
+
+                const legend = allSeries.map(s => {
+                    const last = s.points[s.points.length - 1];
+                    return `<span style="display:inline-flex;align-items:center;gap:6px;font-size:0.85rem;color:#1e293b">
+                        <svg width="20" height="3" style="flex-shrink:0;overflow:visible"><line x1="0" y1="1.5" x2="20" y2="1.5" stroke="${s.color}" stroke-width="2.5"/></svg>
+                        ${esc(s.name)} <span style="color:#94a3b8;font-variant-numeric:tabular-nums">${Number(last.rating).toFixed(2)}</span>
+                    </span>`;
+                }).join('');
+
+                container.innerHTML = svgEl +
+                    `<div style="display:flex;flex-wrap:wrap;gap:1rem;margin-top:0.75rem;padding-left:${mL}px">${legend}</div>`;
+            }
+
+            // ═══════════════════════════════════════════════════════════
             //  Tournament Report tab
             // ═══════════════════════════════════════════════════════════
             const PH_API_BASE = 'https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2';
@@ -1323,6 +1494,71 @@
                     return;
                 }
 
+                // ── Elo history chart ──
+                const historyTableExists = query(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='player_rating_history'"
+                ).length > 0;
+
+                let chartHtml = '';
+                if (historyTableExists) {
+                    const hist = query(`
+                        SELECT h.date, h.rating, h.match_count, c.name AS comp_name, v.name AS venue_name
+                        FROM player_rating_history h
+                        JOIN competitions c ON c.uuid = h.competition_uuid
+                        LEFT JOIN venues v ON c.venue_uuid = v.ph_uuid
+                        WHERE h.player_uuid = ?
+                        ORDER BY h.date ASC`, [playerUuid]);
+
+                    if (hist.length >= 2) {
+                        const svgW = 520, svgH = 160;
+                        const mL = 52, mR = 16, mT = 12, mB = 28;
+                        const plotW = svgW - mL - mR;
+                        const plotH = svgH - mT - mB;
+
+                        const ratings = hist.map(h => h.rating);
+                        const minR = Math.min(1000, ...ratings);
+                        const maxR = Math.max(1000, ...ratings);
+                        const pad = (maxR - minR) * 0.1 || 20;
+                        const yMin = minR - pad, yMax = maxR + pad;
+
+                        const xPos = i => mL + (i / (hist.length - 1)) * plotW;
+                        const yPos = r => mT + plotH * (1 - (r - yMin) / (yMax - yMin));
+
+                        // Baseline at 1000
+                        const baseY = yPos(1000).toFixed(1);
+                        const baseline = `<line x1="${mL}" y1="${baseY}" x2="${mL + plotW}" y2="${baseY}" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="4,3"/>`;
+                        const baseLabel = `<text x="${mL - 4}" y="${+baseY + 4}" text-anchor="end" font-size="10" fill="#94a3b8">1000</text>`;
+
+                        // Y axis labels (min and max)
+                        const yAxisLabels = [minR, maxR].map(v => {
+                            const y = yPos(v).toFixed(1);
+                            return `<text x="${mL - 4}" y="${+y + 4}" text-anchor="end" font-size="10" fill="#94a3b8">${Math.round(v)}</text>`;
+                        }).join('');
+
+                        // Polyline
+                        const points = hist.map((h, i) => `${xPos(i).toFixed(1)},${yPos(h.rating).toFixed(1)}`).join(' ');
+                        const line = `<polyline points="${points}" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+
+                        // Dots with tooltips
+                        const dots = hist.map((h, i) => {
+                            const cx = xPos(i).toFixed(1);
+                            const cy = yPos(h.rating).toFixed(1);
+                            const venue = h.venue_name ?? h.comp_name;
+                            const tip = `${venue} (${h.date})\nElo: ${Number(h.rating).toFixed(2)} · ${h.match_count} matches`;
+                            return `<circle cx="${cx}" cy="${cy}" r="3.5" fill="#3b82f6" stroke="#fff" stroke-width="1.5"><title>${tip}</title></circle>`;
+                        }).join('');
+
+                        // X axis: first and last date labels
+                        const xAxisLabels = [
+                            `<text x="${mL}" y="${svgH - 6}" text-anchor="middle" font-size="10" fill="#94a3b8">${hist[0].date}</text>`,
+                            `<text x="${mL + plotW}" y="${svgH - 6}" text-anchor="middle" font-size="10" fill="#94a3b8">${hist[hist.length - 1].date}</text>`,
+                        ].join('');
+
+                        const svg = `<svg viewBox="0 0 ${svgW} ${svgH}" style="width:100%;max-width:${svgW}px;display:block;margin-bottom:1rem">${baseline}${baseLabel}${yAxisLabels}${line}${dots}${xAxisLabels}</svg>`;
+                        chartHtml = svg;
+                    }
+                }
+
                 const sections = competitions.map(comp => {
                     const matches = query(`
                     SELECT m.player_a_uuid, m.player_b_uuid, m.player_a_score, m.player_b_score,
@@ -1371,7 +1607,7 @@
                 </div>`;
                 });
 
-                bodyEl.innerHTML = sections.join('');
+                bodyEl.innerHTML = chartHtml + sections.join('');
             }
 
             // ═══════════════════════════════════════════════════════════
