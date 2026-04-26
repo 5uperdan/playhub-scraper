@@ -4,6 +4,7 @@ import uuid as _uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     Float,
@@ -105,9 +106,12 @@ class Competition(Base):
     start_time = Column(String, nullable=True)  # ISO 8601 datetime from first round's earliest match created_at
     attended_player_count = Column(Integer, nullable=True)
     set_championship_type_uuid = Column(String, ForeignKey("set_championship_types.uuid"), nullable=True)
+    is_complete = Column(Boolean, nullable=False, default=False)
+    winning_player_uuid = Column(String, ForeignKey("players.uuid"), nullable=True)
 
     venue = relationship("Venue", back_populates="competitions")
     set_championship_type = relationship("SetChampionshipType", back_populates="competitions")
+    winner = relationship("Player", foreign_keys="Competition.winning_player_uuid")
     matches = relationship("Match", back_populates="competition")
     results = relationship("CompetitionResult", back_populates="competition")
 
@@ -141,7 +145,7 @@ class CompetitionResult(Base):
 
     competition_uuid = Column(String, ForeignKey("competitions.uuid"), primary_key=True)
     player_uuid = Column(String, ForeignKey("players.uuid"), primary_key=True)
-    position = Column(Integer, nullable=True)
+    position = Column(String, nullable=True)
 
     competition = relationship("Competition", back_populates="results")
     player = relationship("Player", back_populates="results")

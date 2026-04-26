@@ -156,10 +156,11 @@ def _process_event(session, event_id, set_type_uuid=None, replace=False):
     )
     comp.name = comp_name
     comp.attended_player_count = player_count
+    comp.is_complete = event.display_status == "complete"
     if set_type_uuid and comp.set_championship_type_uuid is None:
         comp.set_championship_type_uuid = set_type_uuid
 
-    # --- Registrations → players + final standings ---
+    # --- Registrations → players (positions assigned after rounds are known) ---
     try:
         registrations = _scrape.fetch_all_registrations(event_id)
     except Exception as e:
@@ -171,7 +172,7 @@ def _process_event(session, event_id, set_type_uuid=None, replace=False):
         player = _get_or_create_player(session, reg.ph_user_id, reg.name)
         reg_by_uid[reg.ph_user_id] = (player, reg.final_place)
 
-    for ph_uid, (player, final_place) in reg_by_uid.items():
+    for ph_uid, (player, _) in reg_by_uid.items():
         existing = (
             session.query(_db.CompetitionResult).filter_by(competition_uuid=comp.uuid, player_uuid=player.uuid).first()
         )
@@ -180,17 +181,16 @@ def _process_event(session, event_id, set_type_uuid=None, replace=False):
                 _db.CompetitionResult(
                     competition_uuid=comp.uuid,
                     player_uuid=player.uuid,
-                    position=final_place,
+                    position=None,
                 )
             )
-        else:
-            existing.position = final_place
 
     # --- Rounds and matches ---
     event_rounds = _scrape.get_rounds_from_event(event)
     click.echo(f"    {len(event_rounds)} rounds to process")
 
     need_start_time = bool(event_rounds) and comp.start_time is None
+    elim_match_data = {}  # round_name -> list[MatchInfo], collected for standings computation
 
     for i, round_info in enumerate(event_rounds):
         round_name = round_info.round_name
@@ -208,6 +208,9 @@ def _process_event(session, event_id, set_type_uuid=None, replace=False):
             timestamps = [m.created_at for m in matches if m.created_at]
             if timestamps:
                 comp.start_time = min(timestamps)
+
+        if _is_elimination_round(round_name):
+            elim_match_data[round_name] = matches
 
         for match_data in matches:
             pa_info = match_data.player_a
@@ -250,6 +253,100 @@ def _process_event(session, event_id, set_type_uuid=None, replace=False):
                 existing_match.player_a_score = match_data.player_a_score
                 existing_match.player_b_score = match_data.player_b_score
                 existing_match.winning_player_uuid = winner_uuid
+
+    # --- Final standings ---
+    if not elim_match_data:
+        # Swiss-only tournament: use the positions returned by the API registrations endpoint.
+        # Detect shared places so they can be prefixed with "=".
+        from collections import Counter
+
+        place_counts = Counter(final_place for _, (_, final_place) in reg_by_uid.items() if final_place is not None)
+        for ph_uid, (player, final_place) in reg_by_uid.items():
+            if final_place is None:
+                pos_str = None
+            else:
+                label = _ordinal(final_place)
+                pos_str = f"={label}" if place_counts[final_place] > 1 else label
+            existing = (
+                session.query(_db.CompetitionResult)
+                .filter_by(competition_uuid=comp.uuid, player_uuid=player.uuid)
+                .first()
+            )
+            if existing is not None:
+                existing.position = pos_str
+            if pos_str == "1st":
+                comp.winning_player_uuid = player.uuid
+    else:
+        # Tournament had knockout rounds.  The API registration standings are unreliable
+        # once elimination matches exist, so compute positions from match results instead.
+        # Winner of Top 2 → "1st", loser → "2nd".
+        # Losers of Top N (N > 2) → "=<N/2+1><suffix>", e.g. Top 4 losers → "=3rd".
+        # Players who did not reach the knockout stage → null.
+        positions = {}  # ph_user_id -> position string
+
+        ko_round_names = sorted(
+            elim_match_data.keys(),
+            key=lambda r: int(re.match(r"Top (\d+)", r).group(1)),
+            reverse=True,
+        )
+
+        for rname in ko_round_names:
+            n = int(re.match(r"Top (\d+)", rname).group(1))
+            for match in elim_match_data[rname]:
+                winner_uid = match.winner_ph_user_id
+                pa_uid = match.player_a.ph_user_id
+                pb_uid = match.player_b.ph_user_id
+                loser_uid = pb_uid if winner_uid == pa_uid else pa_uid
+
+                if n == 2:
+                    if winner_uid is not None:
+                        positions[winner_uid] = "1st"
+                        # Look up the player record to set winning_player_uuid on comp
+                        winner_player = reg_by_uid.get(winner_uid, (None,))[0]
+                        if winner_player is None:
+                            winner_player = session.query(_db.Player).filter_by(ph_user_id=winner_uid).first()
+                        if winner_player is not None:
+                            comp.winning_player_uuid = winner_player.uuid
+                    if loser_uid is not None:
+                        positions[loser_uid] = "2nd"
+                else:
+                    if loser_uid is not None:
+                        positions[loser_uid] = f"={_ordinal(n // 2 + 1)}"
+
+        # Apply computed positions to all registered players.
+        # Players not reached the knockout stage get null.
+        for ph_uid, (player, _) in reg_by_uid.items():
+            pos_label = positions.get(ph_uid)
+            existing = (
+                session.query(_db.CompetitionResult)
+                .filter_by(competition_uuid=comp.uuid, player_uuid=player.uuid)
+                .first()
+            )
+            if existing is not None:
+                existing.position = pos_label
+
+        # Edge case: knockout players not in registrations.
+        for ph_uid, pos_label in positions.items():
+            if ph_uid in reg_by_uid:
+                continue
+            player = session.query(_db.Player).filter_by(ph_user_id=ph_uid).first()
+            if player is None:
+                continue
+            existing = (
+                session.query(_db.CompetitionResult)
+                .filter_by(competition_uuid=comp.uuid, player_uuid=player.uuid)
+                .first()
+            )
+            if existing is not None:
+                existing.position = pos_label
+            else:
+                session.add(
+                    _db.CompetitionResult(
+                        competition_uuid=comp.uuid,
+                        player_uuid=player.uuid,
+                        position=pos_label,
+                    )
+                )
 
     return new_data
 
@@ -396,8 +493,7 @@ def import_set_championship(filter_name, replace):
 
             existing = session.query(_db.Competition).filter_by(ph_event_id=event_id).first()
             if existing is not None and not replace:
-                has_matches = session.query(_db.Match).filter_by(competition_uuid=existing.uuid).count() > 0
-                if has_matches:
+                if existing.is_complete:
                     continue
 
             click.echo(f"  Processing event {event_id}: {ev.name} …")

@@ -66,7 +66,12 @@ The CLI fetches all data directly from the Play Hub API. No Google Sheets or fil
 ### Fresh setup
 
 ```bash
-# Register each set championship season (once per season, using any event from that season)
+# Register each set championship season (once per season, using any event from that season).
+# Events prior to reign of jafar were on melee.
+uv run main.py add-set-championship-type \
+  --url "https://tcg.ravensburgerplay.com/events/161662" \
+  --name "Reign of Jafar"
+
 uv run main.py add-set-championship-type \
   --url "https://tcg.ravensburgerplay.com/events/199050" \
   --name "Fabled"

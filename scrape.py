@@ -50,6 +50,7 @@ class ApiEvent(BaseModel):
     store: Optional[ApiStore] = None
     event_configuration_template: Optional[str] = None
     tournament_phases: list[ApiPhase] = []
+    display_status: Optional[str] = None
 
 
 class ApiEventListItem(BaseModel):

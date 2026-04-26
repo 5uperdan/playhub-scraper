@@ -706,15 +706,10 @@
       c.start_date,
       c.attended_player_count,
       v.name AS venue_name,
-      (
-        SELECT p.name
-        FROM competition_results cr
-        JOIN players p ON p.uuid = cr.player_uuid
-        WHERE cr.competition_uuid = c.uuid AND cr.position = 1
-        LIMIT 1
-      ) AS winner_name
+      p.name AS winner_name
     FROM competitions c
     LEFT JOIN venues v ON c.venue_uuid = v.ph_uuid
+    LEFT JOIN players p ON p.uuid = c.winning_player_uuid
     WHERE LOWER(c.name) LIKE ? OR LOWER(COALESCE(v.name, '')) LIKE ?
     ORDER BY c.start_date ASC, c.name ASC
   `, [pattern, pattern]);
@@ -1037,6 +1032,7 @@
             }
 
             function ordinal(n) {
+                if (typeof n === 'string' && isNaN(Number(n))) return n;
                 const s = ['th', 'st', 'nd', 'rd'];
                 const v = n % 100;
                 return n + (s[(v - 20) % 10] || s[v] || s[0]);
@@ -1572,7 +1568,7 @@
 
                     matches.sort((a, b) => compareRounds(a.round_name, b.round_name));
 
-                    const posText = comp.position != null ? ` · Finished: ${ordinal(comp.position)}` : '';
+                    const posText = comp.position != null ? ` · Finished: ${comp.position}` : '';
                     const countText = comp.attended_player_count != null ? ` · ${comp.attended_player_count} players` : '';
                     const meta = [comp.start_date, comp.venue_name].filter(Boolean).join(' · ') + countText + posText;
 
@@ -1643,6 +1639,7 @@
             }
 
             function ordinal(n) {
+                if (typeof n === 'string' && isNaN(Number(n))) return n;
                 const s = ['th', 'st', 'nd', 'rd'];
                 const v = n % 100;
                 return n + (s[(v - 20) % 10] || s[v] || s[0]);
