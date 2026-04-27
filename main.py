@@ -1580,7 +1580,13 @@ def participation_stats():
     Session = _db.make_session_factory(engine)
 
     with Session() as session:
-        set_types = session.query(_db.SetChampionshipType).order_by(_db.SetChampionshipType.display_name).all()
+        set_types = (
+            session.query(_db.SetChampionshipType)
+            .outerjoin(_db.Competition, _db.Competition.set_championship_type_uuid == _db.SetChampionshipType.uuid)
+            .group_by(_db.SetChampionshipType.uuid)
+            .order_by(func.min(_db.Competition.start_date))
+            .all()
+        )
 
         if not set_types:
             click.echo("No set championship types registered.")

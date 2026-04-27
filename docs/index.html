@@ -497,6 +497,7 @@
             <div class="controls">
                 <input id="lb-filter" type="text" placeholder="Filter by player name…" autocomplete="off">
                 <span id="lb-count" class="count-label"></span>
+                <span id="lb-drift" style="font-size:0.8rem;margin-left:1rem"></span>
             </div>
             <div class="table-wrap">
                 <table>
@@ -684,6 +685,29 @@
                 });
             });
 
+            function switchToTab(tabName, setupFn) {
+                const btn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+                if (!btn) return;
+                btn.click();
+                if (setupFn) setupFn();
+            }
+
+            function goToTournamentReport(eventId) {
+                switchToTab('tournament', () => {
+                    document.getElementById('tr-url').value =
+                        `https://tcg.ravensburgerplay.com/events/${eventId}`;
+                });
+            }
+
+            function goToPlayer(name) {
+                switchToTab('players', () => {
+                    const input = document.getElementById('player-filter');
+                    input.value = name;
+                    playerFilter = name;
+                    renderPlayers();
+                });
+            }
+
             // ═══════════════════════════════════════════════════════════
             //  Competitions tab
             // ═══════════════════════════════════════════════════════════
@@ -702,6 +726,7 @@
                 const rows = query(`
     SELECT
       c.uuid,
+      c.ph_event_id,
       c.name,
       c.start_date,
       c.attended_player_count,
@@ -724,15 +749,23 @@
                 }
 
                 countEl.textContent = `${rows.length} result${rows.length !== 1 ? 's' : ''}`;
-                tbody.innerHTML = rows.map(r => `
+                const el = document.getElementById('comp-tbody');
+                el.innerHTML = rows.map(r => {
+                    const nameCell = r.ph_event_id
+                        ? `<a href="#" data-event-id="${r.ph_event_id}" class="tr-link">${esc(r.name)}</a>`
+                        : esc(r.name);
+                    return `
     <tr>
       <td class="muted" style="white-space:nowrap">${esc(r.start_date) || '—'}</td>
-      <td>${esc(r.name)}</td>
+      <td>${nameCell}</td>
       <td>${esc(r.venue_name) || '<span class="muted">—</span>'}</td>
       <td style="text-align:right">${r.attended_player_count ?? '<span class="muted">—</span>'}</td>
       <td>${esc(r.winner_name) || '<span class="muted">—</span>'}</td>
-    </tr>
-  `).join('');
+    </tr>`;
+                }).join('');
+                el.querySelectorAll('a.tr-link').forEach(a => {
+                    a.addEventListener('click', e => { e.preventDefault(); goToTournamentReport(a.dataset.eventId); });
+                });
             }
 
             // ═══════════════════════════════════════════════════════════
@@ -822,15 +855,22 @@
                 // Fetch all rated players, join to get names, sorted by rating desc
                 const allRows = query(`
     SELECT pr.rating, pr.match_count AS swiss_count, p.name, p.uuid,
-      (
-        SELECT COUNT(*)
-        FROM matches m
-        JOIN rounds r ON r.uuid = m.round_uuid
-        WHERE (m.player_a_uuid = p.uuid OR m.player_b_uuid = p.uuid)
-          AND r.name LIKE 'Top %'
-      ) AS ko_count
+      COALESCE(ko.ko_count, 0) AS ko_count
     FROM player_ratings pr
     JOIN players p ON p.uuid = pr.player_uuid
+    LEFT JOIN (
+      SELECT player_uuid, SUM(cnt) AS ko_count FROM (
+        SELECT m.player_a_uuid AS player_uuid, COUNT(*) AS cnt
+        FROM matches m JOIN rounds r ON r.uuid = m.round_uuid
+        WHERE r.name LIKE 'Top %'
+        GROUP BY m.player_a_uuid
+        UNION ALL
+        SELECT m.player_b_uuid AS player_uuid, COUNT(*) AS cnt
+        FROM matches m JOIN rounds r ON r.uuid = m.round_uuid
+        WHERE r.name LIKE 'Top %'
+        GROUP BY m.player_b_uuid
+      ) GROUP BY player_uuid
+    ) ko ON ko.player_uuid = pr.player_uuid
     ORDER BY pr.rating DESC
   `);
 
@@ -856,15 +896,29 @@
                     ? `${filtered.length} of ${allRows.length} players`
                     : `${allRows.length} players`;
 
-                tbody.innerHTML = filtered.map(r => `
+                // Zero-sum diagnostic: average rating should be ~1000
+                const avgRating = allRows.reduce((s, r) => s + r.rating, 0) / allRows.length;
+                const drift = avgRating - 1000;
+                const driftColour = Math.abs(drift) < 5 ? '#166534' : Math.abs(drift) < 20 ? '#92400e' : '#991b1b';
+                const driftEl = document.getElementById('lb-drift');
+                if (driftEl) {
+                    driftEl.textContent = `Avg rating: ${avgRating.toFixed(2)} (drift ${drift >= 0 ? '+' : ''}${drift.toFixed(2)})`;
+                    driftEl.style.color = driftColour;
+                }
+
+                const el = document.getElementById('lb-tbody');
+                el.innerHTML = filtered.map(r => `
     <tr>
       <td style="text-align:right;color:#94a3b8">${r.rank}</td>
-      <td>${esc(r.name)}</td>
+      <td><a href="#" data-player-name="${esc(r.name)}" class="player-link">${esc(r.name)}</a></td>
       <td style="text-align:right;font-variant-numeric:tabular-nums">${Number(r.rating).toFixed(2)}</td>
       <td style="text-align:right;color:#94a3b8">${r.swiss_count}</td>
       <td style="text-align:right;color:#94a3b8">${r.ko_count}</td>
     </tr>
   `).join('');
+                el.querySelectorAll('a.player-link').forEach(a => {
+                    a.addEventListener('click', e => { e.preventDefault(); goToPlayer(a.dataset.playerName); });
+                });
             }
 
             // ═══════════════════════════════════════════════════════════
@@ -1053,7 +1107,19 @@
                     return;
                 }
 
-                const setTypes = query(`SELECT uuid, display_name FROM set_championship_types ORDER BY display_name`);
+                const setTypes = query(`
+                    SELECT sct.uuid, sct.display_name,
+                        COUNT(DISTINCT c.uuid) AS num_events,
+                        COUNT(cr.player_uuid) AS total_entries,
+                        COUNT(DISTINCT cr.player_uuid) AS unique_players
+                    FROM set_championship_types sct
+                    LEFT JOIN competitions c
+                        ON c.set_championship_type_uuid = sct.uuid
+                        AND EXISTS (SELECT 1 FROM matches m WHERE m.competition_uuid = c.uuid)
+                    LEFT JOIN competition_results cr ON cr.competition_uuid = c.uuid
+                    GROUP BY sct.uuid, sct.display_name
+                    ORDER BY MIN(c.start_date) ASC
+                `);
 
                 if (!setTypes.length) {
                     container.innerHTML = `<div class="empty" style="padding:3rem">No set championship types registered.</div>`;
@@ -1061,19 +1127,7 @@
                 }
 
                 const rows = setTypes.map(st => {
-                    const stats = query(`
-                        SELECT
-                            COUNT(DISTINCT c.uuid) AS num_events,
-                            COUNT(cr.player_uuid) AS total_entries,
-                            COUNT(DISTINCT cr.player_uuid) AS unique_players
-                        FROM competitions c
-                        LEFT JOIN competition_results cr ON cr.competition_uuid = c.uuid
-                        WHERE c.set_championship_type_uuid = ?
-                          AND EXISTS (
-                            SELECT 1 FROM matches m WHERE m.competition_uuid = c.uuid
-                          )
-                    `, [st.uuid]);
-                    const s = stats[0] ?? { num_events: 0, total_entries: 0, unique_players: 0 };
+                    const s = { num_events: st.num_events, total_entries: st.total_entries, unique_players: st.unique_players };
                     return `<tr>
                         <td>${esc(st.display_name)}</td>
                         <td style="text-align:right">${s.num_events}</td>
@@ -1114,13 +1168,20 @@
                 if (!matches.length) { sugBox.style.display = 'none'; sugBox.innerHTML = ''; return; }
                 sugBox.style.display = '';
                 sugBox.innerHTML = matches.map(m =>
-                    `<div onclick="cmpAddPlayer(${JSON.stringify(m.uuid)}, ${JSON.stringify(m.name)})"
+                    `<div data-uuid="${esc(m.uuid)}" data-name="${esc(m.name)}"
                          style="padding:0.35rem 0.65rem;cursor:pointer;font-size:0.875rem;border-bottom:1px solid #f1f5f9"
                          onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">${esc(m.name)}</div>`
                 ).join('');
             });
 
-            document.addEventListener('click', e => {
+            document.getElementById('cmp-suggestions').addEventListener('mousedown', e => {
+                const div = e.target.closest('[data-uuid]');
+                if (!div) return;
+                e.preventDefault(); // keep search input focused
+                cmpAddPlayer(div.dataset.uuid, div.dataset.name);
+            });
+
+            document.addEventListener('mousedown', e => {
                 if (!document.getElementById('cmp-search').contains(e.target) &&
                     !document.getElementById('cmp-suggestions').contains(e.target)) {
                     document.getElementById('cmp-suggestions').style.display = 'none';
@@ -1150,9 +1211,12 @@
                     `<span style="display:inline-flex;align-items:center;gap:0.4rem;background:#f8fafc;border:1px solid ${CMP_COLORS[i]};color:#1e293b;border-radius:999px;padding:0.2rem 0.6rem 0.2rem 0.5rem;font-size:0.85rem">
                         <svg width="10" height="10" style="flex-shrink:0"><circle cx="5" cy="5" r="5" fill="${CMP_COLORS[i]}"/></svg>
                         ${esc(p.name)}
-                        <span onclick="cmpRemovePlayer(${JSON.stringify(p.uuid)})" style="cursor:pointer;color:#94a3b8;font-size:1.1rem;line-height:1;margin-left:1px" title="Remove">×</span>
+                        <span data-remove-uuid="${esc(p.uuid)}" style="cursor:pointer;color:#94a3b8;font-size:1.1rem;line-height:1;margin-left:1px" title="Remove">×</span>
                     </span>`
                 ).join('');
+                container.querySelectorAll('[data-remove-uuid]').forEach(el => {
+                    el.addEventListener('click', () => cmpRemovePlayer(el.dataset.removeUuid));
+                });
             }
 
             function renderCompareChart() {
@@ -1228,9 +1292,25 @@
                     }
                 }
 
-                // X axis date labels
-                svgInner += `<text x="${mL}" y="${svgH - 8}" text-anchor="middle" font-size="10" fill="#94a3b8">${allDates[0]}</text>`;
-                if (n > 1) svgInner += `<text x="${mL + plotW}" y="${svgH - 8}" text-anchor="middle" font-size="10" fill="#94a3b8">${allDates[n - 1]}</text>`;
+                // X axis date labels — show up to 6, evenly spaced, skipping overlaps
+                const maxLabels = 6;
+                const minSpacing = 60; // px between labels
+                const labelIndices = [];
+                if (n === 1) {
+                    labelIndices.push(0);
+                } else {
+                    const step = Math.max(1, Math.round((n - 1) / (maxLabels - 1)));
+                    for (let i = 0; i < n; i += step) labelIndices.push(i);
+                    if (labelIndices[labelIndices.length - 1] !== n - 1) labelIndices.push(n - 1);
+                }
+                let lastLabelX = -Infinity;
+                for (const idx of labelIndices) {
+                    const lx = mL + (n > 1 ? (idx / (n - 1)) * plotW : plotW / 2);
+                    if (lx - lastLabelX < minSpacing && idx !== 0 && idx !== n - 1) continue;
+                    const anchor = idx === 0 ? 'start' : idx === n - 1 ? 'end' : 'middle';
+                    svgInner += `<text x="${lx.toFixed(1)}" y="${svgH - 8}" text-anchor="${anchor}" font-size="10" fill="#94a3b8">${allDates[idx]}</text>`;
+                    lastLabelX = lx;
+                }
 
                 const svgEl = `<svg viewBox="0 0 ${svgW} ${svgH}" style="width:100%;max-width:${svgW}px;display:block">${svgInner}</svg>`;
 
@@ -1478,7 +1558,7 @@
                 bodyEl = bodyEl ?? document.getElementById(`pbody-${playerUuid}`);
 
                 const competitions = query(`
-                SELECT c.uuid, c.name, c.start_date, c.attended_player_count, v.name AS venue_name, cr.position
+                SELECT c.uuid, c.ph_event_id, c.name, c.start_date, c.attended_player_count, v.name AS venue_name, cr.position
                 FROM competition_results cr
                 JOIN competitions c ON c.uuid = cr.competition_uuid
                 LEFT JOIN venues v ON c.venue_uuid = v.ph_uuid
@@ -1597,13 +1677,16 @@
                         : `<div class="empty" style="padding:0.5rem 0;text-align:left">No match records</div>`;
 
                     return `<div class="comp-section">
-                    <div class="comp-section-title">${esc(comp.name)}</div>
+                    <div class="comp-section-title">${comp.ph_event_id ? `<a href="#" data-event-id="${comp.ph_event_id}" class="tr-link">${esc(comp.name)}</a>` : esc(comp.name)}</div>
                     <div class="comp-section-meta">${esc(meta)}</div>
                     ${matchTable}
                 </div>`;
                 });
 
                 bodyEl.innerHTML = chartHtml + sections.join('');
+                bodyEl.querySelectorAll('a.tr-link').forEach(a => {
+                    a.addEventListener('click', e => { e.preventDefault(); goToTournamentReport(a.dataset.eventId); });
+                });
             }
 
             // ═══════════════════════════════════════════════════════════
