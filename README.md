@@ -25,19 +25,7 @@ All queries run entirely in your browser against your database — no external c
 
 To use it, you first need a `playhub.db` database file. There are two ways to get one:
 
-### Option A — No Python required but untested (via GitHub Actions)
-
-Forking creates your own copy of this repository under your GitHub account, including an automated workflow that builds the database for you. You can do this entirely from the GitHub website or mobile app — no terminal needed.
-
-1. Click **Fork** at the top-right of this repository on GitHub (you'll need a free GitHub account)
-2. In your fork, go to **Settings → Actions → General** and ensure Actions are enabled (forks sometimes have them disabled by default)
-3. Go to the **Actions** tab in your fork
-4. Select **Generate Database** in the left-hand list and click **Run workflow → Run workflow**
-5. Wait for the run to complete (usually a few minutes) — a green tick means success
-6. Click into the completed run, scroll to **Artifacts**, and download `playhub-db` — unzip it to get `playhub.db`
-7. Visit the [web interface](https://5uperdan.github.io/playhub-scraper/), upload the file, and explore
-
-**Adding a new set championship season:** When a new season is released, edit `.github/workflows/generate-db.yml` in your fork (you can do this directly on GitHub) and add an `add-set-championship-type` call for the new season. Use any event URL from that season — the tool fetches it to extract the internal template UUID. Then re-run the workflow.
+### Option A - Ask
 
 ### Option B — Generate the database locally (requires Python)
 
