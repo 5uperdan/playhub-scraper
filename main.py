@@ -1627,5 +1627,108 @@ def participation_stats():
             click.echo("")
 
 
+@cli.command("export-anonymized")
+@click.option(
+    "--pattern",
+    "-p",
+    multiple=True,
+    help="Substring to match against player names (case-insensitive). Repeatable.",
+)
+@click.option(
+    "--exclude",
+    "-e",
+    multiple=True,
+    help="Exact player name to exclude from anonymization. Repeatable.",
+)
+@click.option(
+    "--output",
+    "-o",
+    default="playhub_anonymized.db",
+    show_default=True,
+    help="Output path for the anonymized database copy.",
+)
+@click.option("--dry-run", is_flag=True, help="Preview which players would be anonymized without writing output.")
+def export_anonymized(pattern, exclude, output, dry_run):
+    """Export an anonymized copy of the database.
+
+    Players whose names contain any --pattern substring (case-insensitive) are
+    renamed to 'anon' in the output copy. Players whose names exactly match any
+    --exclude value are left unchanged.
+
+    The source database is never modified.
+
+    \b
+      uv run main.py export-anonymized -p App -e Apple -o anon.db
+      uv run main.py export-anonymized -p App -p Obb -e "Apple Orchard" -e "Applebee" --dry-run
+    """
+    import shutil
+
+    if not pattern:
+        raise click.UsageError("Specify at least one --pattern / -p to match against player names.")
+
+    engine = _db.init_db()
+    Session = _db.make_session_factory(engine)
+    exclude_set = set(exclude)
+
+    with Session() as session:
+        all_players = session.query(_db.Player).order_by(_db.Player.uuid).all()
+        to_anonymize = [
+            p
+            for p in all_players
+            if p.name not in exclude_set and any(pat.lower() in p.name.lower() for pat in pattern)
+        ]
+
+    if not to_anonymize:
+        click.echo("No players matched the given patterns.")
+        return
+
+    click.echo(f"Players to anonymize ({len(to_anonymize)}):")
+    for player in to_anonymize:
+        click.echo(f"  {player.name!r}  →  'anon'")
+
+    if dry_run:
+        click.echo("\n(Dry run — no output written.)")
+        return
+
+    shutil.copy2(_db.DB_PATH, output)
+    click.echo(f"\nCopied database to {output!r}")
+
+    anon_engine = _db.make_engine(f"sqlite:///{output}")
+    AnonSession = _db.make_session_factory(anon_engine)
+
+    with AnonSession() as anon_session:
+        anon_players = anon_session.query(_db.Player).order_by(_db.Player.uuid).all()
+        matched = [
+            p
+            for p in anon_players
+            if p.name not in exclude_set and any(pat.lower() in p.name.lower() for pat in pattern)
+        ]
+        matched_uuids = [p.uuid for p in matched]
+
+        for player in matched:
+            player.name = "anon"
+
+        # Purge rows that would expose the anonymized players' activity
+        (
+            anon_session.query(_db.CompetitionResult)
+            .filter(_db.CompetitionResult.player_uuid.in_(matched_uuids))
+            .delete(synchronize_session=False)
+        )
+        (
+            anon_session.query(_db.PlayerRatingHistory)
+            .filter(_db.PlayerRatingHistory.player_uuid.in_(matched_uuids))
+            .delete(synchronize_session=False)
+        )
+        (
+            anon_session.query(_db.PlayerRating)
+            .filter(_db.PlayerRating.player_uuid.in_(matched_uuids))
+            .delete(synchronize_session=False)
+        )
+
+        anon_session.commit()
+
+    click.echo(f"Anonymized {len(matched)} player(s) in {output!r}.")
+
+
 if __name__ == "__main__":
     cli()

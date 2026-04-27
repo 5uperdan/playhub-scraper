@@ -314,6 +314,36 @@ Example output:
 
 ---
 
+### `export-anonymized -p <pattern> [-p <pattern> ...] [-e <name> ...] [-o <output>] [--dry-run]`
+
+Exports a copy of the database with selected players anonymized. Useful for sharing data publicly without exposing the display names of players who haven't consented.
+
+Players are matched by substring against their current display name (case-insensitive). Any player whose name contains at least one `--pattern` value will be anonymized, **unless** their name exactly matches one of the `--exclude` values. Multiple `--pattern` and `--exclude` flags can be provided.
+
+```bash
+# Anonymize everyone whose name contains "App", except "Apple"
+uv run main.py export-anonymized -p App -e Apple -o anon.db
+
+# Preview without writing — multiple patterns and exclusions
+uv run main.py export-anonymized -p App -p Obb -e "Apple Orchard" -e "Applebee" --dry-run
+```
+
+**What is anonymized:**
+
+- The matched players' `name` field in the `players` table is replaced with `"anon"`. All matched players share the same name — they are not numbered or distinguished in any way.
+- Their rows are deleted from `competition_results` (final standings), `player_ratings` (Delo leaderboard), and `player_rating_history` (Delo over time). Because the leaderboard is built from the rows that remain, ranks close up — there are no gaps where anon players used to be. The anon players simply don't appear.
+
+**What is not anonymized:**
+
+- The `players` row itself is kept — UUIDs and `ph_user_id` remain intact. This is intentional: the player record still anchors their match data.
+- **Match records in the `matches` table are not modified.** Matches are stored with player UUIDs rather than names, so they become effectively pseudonymous — the UUID is still there, but it no longer resolves to a meaningful name. If you need match records fully purged, this tool is not sufficient.
+- Competitions, venues, rounds, and all other data are untouched.
+- The **source** `playhub.db` is never modified — only the output copy.
+
+Use `--dry-run` to see exactly which players would be affected before writing anything.
+
+---
+
 ### Database schema
 
 | Table | Key columns |
