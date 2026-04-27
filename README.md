@@ -218,7 +218,7 @@ Delo Leaderboard — top 25 of 312 rated players
     3. Mickey                          1104.37  (14 Swiss, 3 KO)
 ```
 
-The **Swiss match count** is a reliability indicator — the more Swiss matches a player has played, the more their rating reflects real performance. Treat ratings for players with only a handful of matches with caution.
+The **Swiss match count** does not include draws.
 
 ---
 

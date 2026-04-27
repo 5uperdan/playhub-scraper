@@ -971,8 +971,9 @@ def leaderboard(top_n, filter_name):
     """Show the Delo rating leaderboard.
 
     Displays the top N players sorted by rating. The Swiss match count shows how
-    many Swiss matches a player has played — a higher count means a more
-    reliable rating. The KO count shows knockout matches played.
+    many decisive (win or loss) Swiss matches a player has played — draws are not
+    counted. A higher count means a more reliable rating. The KO count shows
+    knockout matches played.
 
     Use --name to search for specific players by name:
 
@@ -1010,6 +1011,7 @@ def leaderboard(top_n, filter_name):
             header = f"Delo Leaderboard — {len(results)} player(s) matching '{filter_name}' of {total_rated} rated"
         else:
             header = f"Delo Leaderboard — top {min(top_n, len(results))} of {total_rated} rated players"
+        header += "\nDraws are not added to a player's swiss match count"
         click.echo(header + "\n")
 
         # Compute global rank for each result
