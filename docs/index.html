@@ -769,6 +769,78 @@
             }
 
             // ═══════════════════════════════════════════════════════════
+            //  Shared player card helpers
+            // ═══════════════════════════════════════════════════════════
+
+            /** Fetch rating info for a player uuid. Returns null if no rating data. */
+            function fetchRatingInfo(playerUuid) {
+                if (!playerUuid || playerUuid === 'null') return null;
+                const pr = query(`
+                    SELECT pr.rating, pr.match_count,
+                      (SELECT COUNT(*) FROM player_ratings WHERE rating > pr.rating) + 1 AS rank,
+                      (SELECT COUNT(*) FROM player_ratings) AS total
+                    FROM player_ratings pr WHERE pr.player_uuid = ?`, [playerUuid]);
+                if (!pr.length) return null;
+                const ko = query(`
+                    SELECT COUNT(*) AS c FROM matches m
+                    JOIN rounds r ON r.uuid = m.round_uuid
+                    WHERE (m.player_a_uuid = ? OR m.player_b_uuid = ?)
+                      AND r.name LIKE 'Top %'`, [playerUuid, playerUuid]);
+                return { rating: pr[0].rating, swiss: pr[0].match_count, ko: ko[0]?.c ?? 0, rank: pr[0].rank, total: pr[0].total };
+            }
+
+            /**
+             * Build a player card header HTML string.
+             * ratingInfo: result of fetchRatingInfo(), or null.
+             */
+            function buildPlayerHeader(name, ratingInfo) {
+                const ratingStr = ratingInfo
+                    ? `<span style="font-weight:400;color:#64748b;font-size:0.85rem"> · Delo: ${Number(ratingInfo.rating).toFixed(2)} · ${ordinal(ratingInfo.rank)} of ${ratingInfo.total} · ${ratingInfo.swiss} Swiss, ${ratingInfo.ko} KO</span>`
+                    : '';
+                return `<span class="player-name">${esc(name)}${ratingStr}</span>`;
+            }
+
+            /**
+             * Build the Round/Opponent/Score/Result table for a player's matches in one competition.
+             * Opponent names are rendered with a data-player-name attribute for post-render link wiring.
+             */
+            function renderMatchTable(matches, playerUuid) {
+                if (!matches.length) return `<div class="empty" style="padding:0.5rem 0;text-align:left">No match records</div>`;
+                const rows = matches.map(m => {
+                    const isA = m.player_a_uuid === playerUuid;
+                    const myScore = isA ? m.player_a_score : m.player_b_score;
+                    const oppScore = isA ? m.player_b_score : m.player_a_score;
+                    const oppName = isA ? m.player_b_name : m.player_a_name;
+                    const oppUuid = isA ? m.player_b_uuid : m.player_a_uuid;
+                    let result, cls;
+                    if (m.winning_player_uuid === null) { result = 'Draw'; cls = 'draw'; }
+                    else if (m.winning_player_uuid === playerUuid) { result = 'Win'; cls = 'win'; }
+                    else { result = 'Loss'; cls = 'loss'; }
+                    const oppLink = `<a href="#" data-player-name="${esc(oppName)}" class="player-nav-link">${esc(oppName)}</a>`;
+                    return `<tr>
+                        <td style="white-space:nowrap">${esc(m.round_name)}</td>
+                        <td>${oppLink}</td>
+                        <td style="text-align:center;white-space:nowrap">${myScore ?? '—'} – ${oppScore ?? '—'}</td>
+                        <td><span class="badge ${cls}">${result}</span></td>
+                    </tr>`;
+                }).join('');
+                return `<div class="nested-table-wrap"><table>
+                    <thead><tr><th>Round</th><th>Opponent</th><th style="text-align:center">Score</th><th>Result</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table></div>`;
+            }
+
+            /** Wire up post-render links within a container element. */
+            function wireCardLinks(container) {
+                container.querySelectorAll('a.tr-link').forEach(a => {
+                    a.addEventListener('click', e => { e.preventDefault(); goToTournamentReport(a.dataset.eventId); });
+                });
+                container.querySelectorAll('a.player-nav-link').forEach(a => {
+                    a.addEventListener('click', e => { e.preventDefault(); goToPlayer(a.dataset.playerName); });
+                });
+            }
+
+            // ═══════════════════════════════════════════════════════════
             //  Players tab
             // ═══════════════════════════════════════════════════════════
             let playerFilter = '';
@@ -802,28 +874,28 @@
                 }
 
                 countEl.textContent = `${rows.length} result${rows.length !== 1 ? 's' : ''}`;
-                list.innerHTML = rows.map(r => `
+                list.innerHTML = rows.map(r => {
+                    const ri = fetchRatingInfo(r.uuid);
+                    return `
     <div class="player-card" data-uuid="${esc(r.uuid)}">
       <div class="player-card-header" onclick="togglePlayer(this)">
-        <span class="player-name">${esc(r.name)}</span>
+        ${buildPlayerHeader(r.name, ri)}
         <span class="chevron">▼</span>
       </div>
       <div class="player-card-body" id="pbody-${esc(r.uuid)}">
         <div class="empty">Loading…</div>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+                }).join('');
             }
 
             function togglePlayer(header) {
                 const card = header.closest('.player-card');
                 const isOpen = card.classList.toggle('open');
-                if (isOpen) renderPlayerDetail(card.dataset.uuid);
-            }
-
-            function renderPlayerDetail(playerUuid) {
-                const bodyEl = document.getElementById(`pbody-${playerUuid}`);
-                renderPlayerDetailInto(playerUuid, bodyEl);
+                if (isOpen) {
+                    const bodyEl = card.querySelector('.player-card-body');
+                    renderPlayerDetailInto(card.dataset.uuid, bodyEl);
+                }
             }
 
             // ═══════════════════════════════════════════════════════════
@@ -1409,31 +1481,12 @@
                     const name = playerRow ? playerRow.name : displayName;
                     const uuid = playerRow ? playerRow.uuid : null;
 
-                    // Rating string if available
-                    let ratingStr = '';
-                    if (uuid) {
-                        const pr = query(`
-                        SELECT pr.rating, pr.match_count,
-                          (SELECT COUNT(*) FROM player_ratings WHERE rating > pr.rating) + 1 AS rank,
-                          (SELECT COUNT(*) FROM player_ratings) AS total
-                        FROM player_ratings pr WHERE pr.player_uuid = ?`, [uuid]);
-                        if (pr.length) {
-                            const ko = query(`
-                            SELECT COUNT(*) AS c FROM matches m
-                            JOIN rounds r ON r.uuid = m.round_uuid
-                            WHERE (m.player_a_uuid = ? OR m.player_b_uuid = ?)
-                              AND r.name LIKE 'Top %'`, [uuid, uuid]);
-                            const koCount = ko.length ? ko[0].c : 0;
-                            ratingStr = ` · Delo: ${Number(pr[0].rating).toFixed(2)} · ${ordinal(pr[0].rank)} of ${pr[0].total} · ${pr[0].match_count} Swiss, ${koCount} KO`;
-                        }
-                    }
-
                     const bodyId = `tr-pbody-${esc(uuid ?? displayName.replace(/\W/g, '_'))}`;
 
                     return `
                     <div class="player-card${inDb ? '' : ' tr-unknown'}" data-uuid="${esc(uuid)}">
                       <div class="player-card-header" onclick="trTogglePlayer(this)">
-                        <span class="player-name">${esc(name)}${ratingStr ? `<span style="font-weight:400;color:#64748b;font-size:0.85rem">${esc(ratingStr)}</span>` : ''}</span>
+                        ${buildPlayerHeader(name, inDb ? fetchRatingInfo(uuid) : null)}
                         <span class="chevron">${inDb ? '▼' : '—'}</span>
                       </div>
                       <div class="player-card-body" id="${bodyId}">
@@ -1647,41 +1700,15 @@
                     const countText = comp.attended_player_count != null ? ` · ${comp.attended_player_count} players` : '';
                     const meta = [comp.start_date, comp.venue_name].filter(Boolean).join(' · ') + countText + posText;
 
-                    const matchRows = matches.map(m => {
-                        const isA = m.player_a_uuid === playerUuid;
-                        const myScore = isA ? m.player_a_score : m.player_b_score;
-                        const oppScore = isA ? m.player_b_score : m.player_a_score;
-                        const oppName = isA ? m.player_b_name : m.player_a_name;
-                        let result, cls;
-                        if (m.winning_player_uuid === null) { result = 'Draw'; cls = 'draw'; }
-                        else if (m.winning_player_uuid === playerUuid) { result = 'Win'; cls = 'win'; }
-                        else { result = 'Loss'; cls = 'loss'; }
-                        return `<tr>
-                        <td style="white-space:nowrap">${esc(m.round_name)}</td>
-                        <td>${esc(oppName)}</td>
-                        <td style="text-align:center;white-space:nowrap">${myScore ?? '—'} – ${oppScore ?? '—'}</td>
-                        <td><span class="badge ${cls}">${result}</span></td>
-                    </tr>`;
-                    }).join('');
-
-                    const matchTable = matches.length
-                        ? `<div class="nested-table-wrap"><table>
-                        <thead><tr><th>Round</th><th>Opponent</th><th style="text-align:center">Score</th><th>Result</th></tr></thead>
-                        <tbody>${matchRows}</tbody>
-                       </table></div>`
-                        : `<div class="empty" style="padding:0.5rem 0;text-align:left">No match records</div>`;
-
                     return `<div class="comp-section">
                     <div class="comp-section-title">${comp.ph_event_id ? `<a href="#" data-event-id="${comp.ph_event_id}" class="tr-link">${esc(comp.name)}</a>` : esc(comp.name)}</div>
                     <div class="comp-section-meta">${esc(meta)}</div>
-                    ${matchTable}
+                    ${renderMatchTable(matches, playerUuid)}
                 </div>`;
                 });
 
                 bodyEl.innerHTML = chartHtml + sections.join('');
-                bodyEl.querySelectorAll('a.tr-link').forEach(a => {
-                    a.addEventListener('click', e => { e.preventDefault(); goToTournamentReport(a.dataset.eventId); });
-                });
+                wireCardLinks(bodyEl);
             }
 
             // ═══════════════════════════════════════════════════════════
