@@ -1334,12 +1334,7 @@
 
             function phFetch(path) {
                 const url = CORS_PROXY + encodeURIComponent(PH_API_BASE + path);
-                return fetch(url, {
-                    headers: {
-                        'x-game-slug': 'disney-lorcana',
-                        'Accept': 'application/json',
-                    }
-                });
+                return fetch(url);
             }
 
             function trStatus(msg, isError = false) {
