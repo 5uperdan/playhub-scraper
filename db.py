@@ -55,6 +55,7 @@ class Venue(Base):
 
     ph_uuid = Column(String, primary_key=True)
     name = Column(String, nullable=False)
+    address = Column(String, nullable=True)
 
     competitions = relationship("Competition", back_populates="venue")
 

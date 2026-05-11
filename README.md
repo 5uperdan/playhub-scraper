@@ -2,7 +2,7 @@
 
 A tool for collecting and exploring Disney Lorcana Set Championship results from [Play Hub](https://tcg.ravensburgerplay.com). It fetches match-level data (players, rounds, scores, standings) directly from the Play Hub API and stores it in a local database, which you can then explore through a web interface or query via a command-line tool.
 
-**[Open the web interface →](https://5uperdan.github.io/playhub-scraper/)**
+**[Stats dashboard →](https://5uperdan.github.io/playhub-scraper/)** | **[Upcoming events →](https://5uperdan.github.io/playhub-scraper/upcoming.html)**
 
 ## Vibes
 
@@ -12,7 +12,25 @@ This project was fully vibe coded by Claude with not a single line of code writt
 
 ## Using the web interface
 
-The [web interface](https://5uperdan.github.io/playhub-scraper/) lets you explore competition results and player histories in your browser. It has six tabs:
+### Upcoming Set Championships
+
+**[Open the upcoming events page →](https://5uperdan.github.io/playhub-scraper/upcoming.html)**
+
+The [upcoming events page](https://5uperdan.github.io/playhub-scraper/upcoming.html) shows upcoming set championship events sorted by travel time from your postcode. Enter your postcode and it fetches the pre-generated CSV for that postcode directly from GitHub Pages — no database upload required.
+
+You can also link directly to a specific postcode by adding a `?postcode=` URL parameter, which skips the entry screen entirely:
+
+```
+https://5uperdan.github.io/playhub-scraper/upcoming.html?postcode=MK6+3LP
+```
+
+The page loads data from a pre-generated CSV file (e.g. `upcoming_MK6.csv`) that lives in the `docs/` folder alongside the page. If no CSV exists for the postcode you enter, the page will tell you which CLI command to run to generate it. See [`upcoming-set-champs`](#upcoming-set-champs---name-season---postcode-postcode) for how to create these files.
+
+---
+
+### Stats dashboard
+
+The [stats dashboard](https://5uperdan.github.io/playhub-scraper/) lets you explore competition results and player histories in your browser. It has six tabs:
 
 - **Competitions** — browse and filter all competitions by name or venue, see player counts and winners
 - **Players** — search by name, then click a player to expand their full competition and match history, including an Delo rating chart
@@ -345,6 +363,36 @@ uv run main.py export-anonymized -p App -p Obb -e "Apple Orchard" -e "Applebee" 
 - The **source** `playhub.db` is never modified — only the output copy.
 
 Use `--dry-run` to see exactly which players would be affected before writing anything.
+
+---
+
+### `upcoming-set-champs --name <season> --postcode <postcode>`
+
+Generates a CSV of upcoming set championship events for a season, including travel times from a given origin postcode. Writes to `docs/upcoming_<POSTCODE>.csv`.
+
+Columns: Date, Venue, Location, Postcode, Players signed up, Players at last set champ, Travel time, Route link, Event link, Last set champ link. All data is read from the local database — no PlayHub API calls are made.
+
+Events are sorted by date ascending, with a blank row between each day's events, and within each day by travel time ascending.
+
+```bash
+# Single postcode (as much or little precision as you want)
+uv run main.py upcoming-set-champs --name "Wilds Unknown" --postcode "MK9"
+
+# Multiple postcodes from a file (one per line) — writes one CSV per postcode
+uv run main.py upcoming-set-champs --name "Wilds Unknown" --postcodes-file postcodes.txt
+```
+
+Once the CSV is committed and pushed to `docs/`, you can view the results at:
+
+```
+https://5uperdan.github.io/playhub-scraper/upcoming.html?postcode=MK9
+```
+
+The [upcoming events page](https://5uperdan.github.io/playhub-scraper/upcoming.html) fetches the CSV directly from GitHub Pages. If you pass a postcode for which no CSV exists in `docs/`, the page will show an error with the exact command to run.
+
+Travel times are calculated using [OSRM](http://project-osrm.org/) (no API key required, no traffic model). Route links open Google Maps directions in your browser. Geocoding is via [Nominatim](https://nominatim.openstreetmap.org/) (OpenStreetMap).
+
+If a CSV already exists for a postcode, cached travel times are reused automatically — no geocoding or routing API calls are made for venues that already have a travel time. Only new venues (not previously in the file) will trigger routing lookups.
 
 ---
 

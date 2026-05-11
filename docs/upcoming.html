@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upcoming Set Championships</title>
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f1f5f9;
+            color: #1e293b;
+            min-height: 100vh;
+        }
+
+        header {
+            background: #1e293b;
+            color: #fff;
+            padding: 0 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            height: 52px;
+        }
+
+        header h1 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            flex: 1;
+        }
+
+        header a {
+            color: #94a3b8;
+            text-decoration: none;
+            font-size: 0.8rem;
+            border: 1px solid #475569;
+            border-radius: 6px;
+            padding: 0.25rem 0.75rem;
+            transition: color 0.15s, border-color 0.15s;
+        }
+
+        header a:hover {
+            color: #e2e8f0;
+            border-color: #94a3b8;
+        }
+
+        /* ── Postcode entry screen ── */
+        #entry-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: calc(100vh - 52px);
+            padding: 2rem;
+            gap: 1.5rem;
+        }
+
+        .hero {
+            text-align: center;
+        }
+
+        .hero h2 {
+            font-size: 1.75rem;
+            font-weight: 700;
+        }
+
+        .hero p {
+            color: #64748b;
+            margin-top: 0.5rem;
+            max-width: 44ch;
+            line-height: 1.6;
+        }
+
+        .postcode-form {
+            display: flex;
+            gap: 0.5rem;
+            width: 100%;
+            max-width: 380px;
+        }
+
+        .postcode-form input {
+            flex: 1;
+            padding: 0.625rem 0.875rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            font: inherit;
+            font-size: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        .postcode-form input:focus {
+            border-color: #2563eb;
+        }
+
+        .postcode-form button,
+        .btn-primary {
+            padding: 0.625rem 1.25rem;
+            background: #2563eb;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font: inherit;
+            font-size: 0.9375rem;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.15s;
+        }
+
+        .postcode-form button:hover,
+        .btn-primary:hover {
+            background: #1d4ed8;
+        }
+
+        .error-msg {
+            color: #dc2626;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 6px;
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+            max-width: 380px;
+            text-align: center;
+        }
+
+        /* ── Results screen ── */
+        #results-screen {
+            display: none;
+        }
+
+        .results-header {
+            background: #fff;
+            border-bottom: 1px solid #e2e8f0;
+            padding: 1rem 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .results-header h2 {
+            font-size: 1rem;
+            font-weight: 600;
+            flex: 1;
+            min-width: 0;
+        }
+
+        #change-postcode-btn {
+            background: transparent;
+            border: 1px solid #cbd5e1;
+            color: #64748b;
+            border-radius: 6px;
+            padding: 0.3rem 0.75rem;
+            font: inherit;
+            font-size: 0.8rem;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: border-color 0.15s, color 0.15s;
+        }
+
+        #change-postcode-btn:hover {
+            border-color: #94a3b8;
+            color: #1e293b;
+        }
+
+        .content-wrap {
+            padding: 1.5rem;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        /* ── Controls ── */
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1.25rem;
+            flex-wrap: wrap;
+        }
+
+        .controls input[type="text"] {
+            flex: 1;
+            max-width: 340px;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            font: inherit;
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        .controls input[type="text"]:focus {
+            border-color: #2563eb;
+        }
+
+        .count-label {
+            color: #94a3b8;
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+
+        /* ── Table ── */
+        .table-wrap {
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            background: #fff;
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        thead th {
+            background: #f8fafc;
+            text-align: left;
+            padding: 0.625rem 0.875rem;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid #e2e8f0;
+            white-space: nowrap;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        thead th:hover {
+            color: #1e293b;
+        }
+
+        thead th.sort-asc::after {
+            content: ' ↑';
+            color: #2563eb;
+        }
+
+        thead th.sort-desc::after {
+            content: ' ↓';
+            color: #2563eb;
+        }
+
+        tbody td {
+            padding: 0.625rem 0.875rem;
+            border-bottom: 1px solid #f1f5f9;
+            vertical-align: middle;
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        tbody tr:hover td {
+            background: #f8fafc;
+        }
+
+        tbody tr.day-separator td {
+            border-bottom: 2px solid #e2e8f0;
+            padding-top: 0;
+            padding-bottom: 0;
+            height: 0.5rem;
+            background: #f8fafc;
+        }
+
+        .muted {
+            color: #94a3b8;
+        }
+
+        .badge-na {
+            color: #94a3b8;
+            font-style: italic;
+            font-size: 0.85rem;
+        }
+
+        .link-icon {
+            font-size: 0.9rem;
+            text-decoration: none;
+            color: #2563eb;
+        }
+
+        .link-icon:hover {
+            color: #1d4ed8;
+        }
+
+        td.numeric {
+            text-align: right;
+        }
+
+        .travel-fast {
+            color: #166534;
+            font-weight: 600;
+        }
+
+        .travel-mid {
+            color: #92400e;
+        }
+
+        .travel-slow {
+            color: #991b1b;
+        }
+
+        /* ── Loading state ── */
+        #loading {
+            display: none;
+            text-align: center;
+            padding: 3rem;
+            color: #64748b;
+        }
+
+        .spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid #e2e8f0;
+            border-top-color: #2563eb;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* ── Mobile ── */
+        @media (max-width: 640px) {
+            header {
+                padding: 0 0.75rem;
+            }
+
+            .content-wrap {
+                padding: 0.875rem 0.75rem;
+            }
+
+            .controls input[type="text"] {
+                max-width: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <h1>🎴 Upcoming Set Championships</h1>
+        <a href="index.html">Stats dashboard →</a>
+    </header>
+
+    <!-- ═══════════════════════════════════════════════════════════
+     POSTCODE ENTRY SCREEN
+════════════════════════════════════════════════════════════ -->
+    <div id="entry-screen">
+        <div class="hero">
+            <h2>Find events near you</h2>
+            <p>Enter your postcode to load upcoming set championship events, sorted by travel time.</p>
+        </div>
+
+        <form class="postcode-form" id="postcode-form">
+            <input type="text" id="postcode-input" placeholder="e.g. MK6 3LP" autocomplete="postal-code"
+                autocorrect="off" autocapitalize="characters" spellcheck="false">
+            <button type="submit">Load</button>
+        </form>
+
+        <div id="entry-error" class="error-msg" style="display:none"></div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+     LOADING
+════════════════════════════════════════════════════════════ -->
+    <div id="loading">
+        <div class="spinner"></div>
+        <p>Loading events…</p>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+     RESULTS SCREEN
+════════════════════════════════════════════════════════════ -->
+    <div id="results-screen">
+        <div class="results-header">
+            <h2 id="results-title"></h2>
+            <button id="change-postcode-btn">Change postcode</button>
+        </div>
+
+        <div class="content-wrap">
+            <div class="controls">
+                <input type="text" id="venue-filter" placeholder="Filter by venue or location…" autocomplete="off">
+                <span id="event-count" class="count-label"></span>
+            </div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th data-col="date">Date</th>
+                            <th data-col="venue">Venue</th>
+                            <th data-col="location">Location</th>
+                            <th data-col="signed_up" class="numeric" style="text-align:right">Signed up</th>
+                            <th data-col="last_champ" class="numeric" style="text-align:right">Last set champ</th>
+                            <th data-col="travel">Travel time</th>
+                            <th>Links</th>
+                        </tr>
+                    </thead>
+                    <tbody id="events-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ═══════════════════════════════════════════════════════════
+        //  CSV parsing (RFC 4180 — handles quoted fields with commas)
+        // ═══════════════════════════════════════════════════════════
+        function parseCSV(text) {
+            const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+            if (!lines.length) return [];
+
+            function parseLine(line) {
+                const fields = [];
+                let i = 0;
+                while (i < line.length) {
+                    if (line[i] === '"') {
+                        // Quoted field
+                        let val = '';
+                        i++; // skip opening quote
+                        while (i < line.length) {
+                            if (line[i] === '"' && line[i + 1] === '"') {
+                                val += '"'; i += 2;
+                            } else if (line[i] === '"') {
+                                i++; break;
+                            } else {
+                                val += line[i++];
+                            }
+                        }
+                        if (line[i] === ',') i++;
+                        fields.push(val);
+                    } else {
+                        const end = line.indexOf(',', i);
+                        if (end === -1) {
+                            fields.push(line.slice(i));
+                            break;
+                        }
+                        fields.push(line.slice(i, end));
+                        i = end + 1;
+                    }
+                }
+                return fields;
+            }
+
+            const headers = parseLine(lines[0]);
+            const rows = [];
+            for (let l = 1; l < lines.length; l++) {
+                const line = lines[l].trim();
+                if (!line) continue;
+                const vals = parseLine(line);
+                const obj = {};
+                headers.forEach((h, i) => obj[h] = vals[i] ?? '');
+                rows.push(obj);
+            }
+            return rows;
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  Travel time → sortable seconds (N/A → Infinity)
+        // ═══════════════════════════════════════════════════════════
+        function travelToSeconds(str) {
+            if (!str || str === 'N/A') return Infinity;
+            let secs = 0;
+            const h = str.match(/(\d+)h/);
+            const m = str.match(/(\d+)m/);
+            if (h) secs += parseInt(h[1]) * 3600;
+            if (m) secs += parseInt(m[1]) * 60;
+            return secs || Infinity;
+        }
+
+        function travelClass(str) {
+            const s = travelToSeconds(str);
+            if (s <= 3600) return 'travel-fast';
+            if (s <= 7200) return 'travel-mid';
+            return 'travel-slow';
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  Postcode normalisation — uppercase and add space if missing
+        // ═══════════════════════════════════════════════════════════
+        function normalisePostcode(raw) {
+            const clean = raw.trim().toUpperCase().replace(/\s+/g, '');
+            if (clean.length < 5) return raw.trim().toUpperCase();
+            // Insert space before last 3 chars (standard UK format)
+            return clean.slice(0, -3) + ' ' + clean.slice(-3);
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  CSV URL from postcode   e.g.  MK6 3LP  →  upcoming_MK6_3LP.csv
+        // ═══════════════════════════════════════════════════════════
+        function csvFilename(postcode) {
+            return 'upcoming_' + postcode.replace(/\s+/g, '_') + '.csv';
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  State
+        // ═══════════════════════════════════════════════════════════
+        let allRows = [];
+        let filterText = '';
+        let sortCol = null;  // null = use natural CSV order (date + travel asc)
+        let sortDir = 1;     // 1 = asc, -1 = desc
+
+        // ═══════════════════════════════════════════════════════════
+        //  Load CSV and render
+        // ═══════════════════════════════════════════════════════════
+        async function loadPostcode(postcode) {
+            const norm = normalisePostcode(postcode);
+            const filename = csvFilename(norm);
+
+            showLoading();
+            try {
+                const resp = await fetch(filename);
+                if (!resp.ok) {
+                    throw new Error(
+                        resp.status === 404
+                            ? `No data found for ${norm}. Generate it with: uv run main.py upcoming-set-champs --postcode "${norm}"`
+                            : `Failed to load data (HTTP ${resp.status})`
+                    );
+                }
+                const text = await resp.text();
+                allRows = parseCSV(text);
+                if (!allRows.length) throw new Error('CSV file is empty.');
+
+                // Update URL so the page can be bookmarked / shared
+                const url = new URL(window.location);
+                url.searchParams.set('postcode', norm);
+                window.history.replaceState({}, '', url);
+
+                sortCol = null;
+                filterText = '';
+                document.getElementById('venue-filter').value = '';
+                document.getElementById('results-title').textContent =
+                    `Upcoming events — travelling from ${norm}`;
+                showResults();
+                renderTable();
+            } catch (err) {
+                showEntry();
+                showEntryError(err.message);
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  Render table
+        // ═══════════════════════════════════════════════════════════
+        function esc(str) {
+            return (str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function renderTable() {
+            let rows = allRows;
+
+            // Filter
+            if (filterText) {
+                const f = filterText.toLowerCase();
+                rows = rows.filter(r =>
+                    (r['Venue'] || '').toLowerCase().includes(f) ||
+                    (r['Location'] || '').toLowerCase().includes(f)
+                );
+            }
+
+            // Sort — if no sort col, use natural CSV order (already date+travel sorted)
+            if (sortCol) {
+                rows = [...rows].sort((a, b) => {
+                    let av, bv;
+                    if (sortCol === 'travel') {
+                        av = travelToSeconds(a['Travel time']);
+                        bv = travelToSeconds(b['Travel time']);
+                    } else if (sortCol === 'signed_up') {
+                        av = parseInt(a['Players signed up']) || 0;
+                        bv = parseInt(b['Players signed up']) || 0;
+                    } else if (sortCol === 'last_champ') {
+                        av = parseInt(a['Players at last set champ']) || 0;
+                        bv = parseInt(b['Players at last set champ']) || 0;
+                    } else if (sortCol === 'date') {
+                        av = a['Date'] || '';
+                        bv = b['Date'] || '';
+                    } else if (sortCol === 'venue') {
+                        av = (a['Venue'] || '').toLowerCase();
+                        bv = (b['Venue'] || '').toLowerCase();
+                    } else if (sortCol === 'location') {
+                        av = (a['Location'] || '').toLowerCase();
+                        bv = (b['Location'] || '').toLowerCase();
+                    }
+                    if (av < bv) return -1 * sortDir;
+                    if (av > bv) return 1 * sortDir;
+                    return 0;
+                });
+            }
+
+            const tbody = document.getElementById('events-tbody');
+            const countEl = document.getElementById('event-count');
+            countEl.textContent = `${rows.length} event${rows.length !== 1 ? 's' : ''}`;
+
+            if (!rows.length) {
+                tbody.innerHTML = `<tr><td colspan="7" style="padding:2rem;text-align:center;color:#94a3b8;font-style:italic">No events match your filter</td></tr>`;
+                return;
+            }
+
+            // Group by date for day separators (only in natural sort mode)
+            const useSeparators = !sortCol;
+            let lastDate = null;
+            const html = [];
+
+            rows.forEach(r => {
+                const date = r['Date'] || '';
+                if (useSeparators && lastDate !== null && date !== lastDate) {
+                    html.push(`<tr class="day-separator"><td colspan="7"></td></tr>`);
+                }
+                lastDate = date;
+
+                const travel = r['Travel time'] || 'N/A';
+                const tClass = travelClass(travel);
+                const routeLink = r['Route link'];
+                const eventLink = r['Event link'];
+                const lastChampLink = r['Last set champ link'];
+                const signedUp = r['Players signed up'];
+                const lastChamp = r['Players at last set champ'];
+                const postcode = r['Postcode'];
+
+                const links = [];
+                if (routeLink) links.push(`<a class="link-icon" href="${esc(routeLink)}" target="_blank" rel="noopener" title="Directions">🗺️</a>`);
+                if (eventLink) links.push(`<a class="link-icon" href="${esc(eventLink)}" target="_blank" rel="noopener" title="Event page">🔗</a>`);
+                if (lastChampLink) links.push(`<a class="link-icon" href="${esc(lastChampLink)}" target="_blank" rel="noopener" title="Last set champ">📋</a>`);
+
+                html.push(`<tr>
+                    <td class="muted" style="white-space:nowrap">${esc(date) || '—'}</td>
+                    <td style="font-weight:500">${esc(r['Venue']) || '—'}</td>
+                    <td class="muted" style="font-size:0.82rem;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r['Location'])}">${esc(postcode) || esc(r['Location']) || '—'}</td>
+                    <td class="numeric">${signedUp !== '' && signedUp !== 'N/A' ? esc(signedUp) : '<span class="badge-na">—</span>'}</td>
+                    <td class="numeric">${lastChamp !== '' && lastChamp !== 'N/A' ? esc(lastChamp) : '<span class="badge-na">—</span>'}</td>
+                    <td><span class="${tClass}">${esc(travel)}</span></td>
+                    <td style="white-space:nowrap">${links.join(' ')}</td>
+                </tr>`);
+            });
+
+            tbody.innerHTML = html.join('');
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  Column sort
+        // ═══════════════════════════════════════════════════════════
+        document.querySelectorAll('thead th[data-col]').forEach(th => {
+            th.addEventListener('click', () => {
+                const col = th.dataset.col;
+                if (sortCol === col) {
+                    sortDir *= -1;
+                } else {
+                    sortCol = col;
+                    sortDir = 1;
+                }
+                document.querySelectorAll('thead th').forEach(h => {
+                    h.classList.remove('sort-asc', 'sort-desc');
+                });
+                th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
+                renderTable();
+            });
+        });
+
+        // ═══════════════════════════════════════════════════════════
+        //  Venue filter
+        // ═══════════════════════════════════════════════════════════
+        document.getElementById('venue-filter').addEventListener('input', e => {
+            filterText = e.target.value.trim();
+            renderTable();
+        });
+
+        // ═══════════════════════════════════════════════════════════
+        //  Screen transitions
+        // ═══════════════════════════════════════════════════════════
+        function showEntry() {
+            document.getElementById('entry-screen').style.display = '';
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('results-screen').style.display = 'none';
+        }
+
+        function showLoading() {
+            document.getElementById('entry-screen').style.display = 'none';
+            document.getElementById('loading').style.display = '';
+            document.getElementById('results-screen').style.display = 'none';
+        }
+
+        function showResults() {
+            document.getElementById('entry-screen').style.display = 'none';
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('results-screen').style.display = '';
+        }
+
+        function showEntryError(msg) {
+            const el = document.getElementById('entry-error');
+            el.textContent = msg;
+            el.style.display = '';
+        }
+
+        function clearEntryError() {
+            document.getElementById('entry-error').style.display = 'none';
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  Form submission
+        // ═══════════════════════════════════════════════════════════
+        document.getElementById('postcode-form').addEventListener('submit', e => {
+            e.preventDefault();
+            const val = document.getElementById('postcode-input').value.trim();
+            if (!val) return;
+            clearEntryError();
+            loadPostcode(val);
+        });
+
+        document.getElementById('change-postcode-btn').addEventListener('click', () => {
+            // Remove postcode from URL
+            const url = new URL(window.location);
+            url.searchParams.delete('postcode');
+            window.history.replaceState({}, '', url);
+            document.getElementById('postcode-input').value = '';
+            showEntry();
+        });
+
+        document.getElementById('postcode-input').addEventListener('input', clearEntryError);
+
+        // ═══════════════════════════════════════════════════════════
+        //  URL parameter bootstrap — skip entry screen if ?postcode=
+        // ═══════════════════════════════════════════════════════════
+        (function init() {
+            const params = new URLSearchParams(window.location.search);
+            const pc = params.get('postcode');
+            if (pc) {
+                document.getElementById('postcode-input').value = pc;
+                loadPostcode(pc);
+            }
+        })();
+    </script>
+</body>
+
+</html>

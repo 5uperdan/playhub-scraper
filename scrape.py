@@ -51,6 +51,7 @@ class ApiEvent(BaseModel):
     event_configuration_template: Optional[str] = None
     tournament_phases: list[ApiPhase] = []
     display_status: Optional[str] = None
+    full_address: Optional[str] = None
 
 
 class ApiEventListItem(BaseModel):
@@ -58,6 +59,8 @@ class ApiEventListItem(BaseModel):
     id: int
     name: Optional[str] = None
     start_datetime: Optional[str] = None
+    full_address: Optional[str] = None
+    registered_user_count: Optional[int] = None
     store: Optional[ApiStore] = None
 
 
@@ -168,6 +171,8 @@ class UkEventInfo(BaseModel):
     name: str
     start_date: Optional[str] = None
     store_name: Optional[str] = None
+    full_address: Optional[str] = None
+    registered_user_count: Optional[int] = None
     set_championship_type_template: Optional[str] = None
 
 
@@ -302,6 +307,8 @@ def fetch_events_for_template(template_id: str, progress_callback=None) -> list[
                     name=event.name or f"Event {event.id}",
                     start_date=(event.start_datetime or "").split("T")[0] or None,
                     store_name=event.store.name if event.store else None,
+                    full_address=event.full_address,
+                    registered_user_count=event.registered_user_count,
                 )
             )
 

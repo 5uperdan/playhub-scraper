@@ -8,8 +8,12 @@ Usage:
   uv run main.py leaderboard [--name <filter>] [--top <n>]
 """
 
+import csv
+import os
 import re
 import sys
+import time
+import urllib.parse
 from dataclasses import dataclass, field
 from datetime import date as _date
 from datetime import datetime, timezone
@@ -62,15 +66,17 @@ def _get_or_create_round(session, round_name):
     return rnd
 
 
-def _get_or_create_venue(session, ph_uuid, name):
+def _get_or_create_venue(session, ph_uuid, name, address=None):
     venue = session.query(_db.Venue).filter_by(ph_uuid=ph_uuid).first()
     if venue is None:
-        venue = _db.Venue(ph_uuid=ph_uuid, name=name)
+        venue = _db.Venue(ph_uuid=ph_uuid, name=name, address=address)
         session.add(venue)
         session.flush()
     else:
         # Update name to the latest value seen, in case the store has been renamed
         venue.name = name
+        if address:
+            venue.address = address
     return venue
 
 
@@ -133,7 +139,7 @@ def _process_event(session, event_id, set_type_uuid=None, replace=False):
     if not venue_info.ph_uuid:
         click.echo(f"    Warning: no venue UUID for event {event_id}, skipping")
         return False
-    venue = _get_or_create_venue(session, venue_info.ph_uuid, venue_info.name)
+    venue = _get_or_create_venue(session, venue_info.ph_uuid, venue_info.name, address=event.full_address)
 
     # --- Competition ---
     comp_name = event.name or f"Event {event_id}"
@@ -1731,6 +1737,332 @@ def export_anonymized(pattern, exclude, output, dry_run):
 
     click.echo(f"Anonymized {len(matched)} player(s) in {output!r}.")
 
+
+# ---------------------------------------------------------------------------
+# Command: upcoming-set-champs
+# ---------------------------------------------------------------------------
+
+_NOMINATIM_API = "https://nominatim.openstreetmap.org/search"
+_OSRM_API = "http://router.project-osrm.org/route/v1/driving"
+_NOMINATIM_HEADERS = {
+    "User-Agent": "playhub-scraper/1.0 (github.com/5uperdan/playhub-scraper)",
+}
+_UK_POSTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b", re.IGNORECASE)
+_UK_POSTCODE_ONLY_RE = re.compile(r"^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$", re.IGNORECASE)
+_UPCOMING_CSV_HEADERS = [
+    "Date",
+    "Venue",
+    "Location",
+    "Postcode",
+    "Players signed up",
+    "Players at last set champ",
+    "Travel time",
+    "Route link",
+    "Event link",
+    "Last set champ link",
+]
+
+
+@dataclass
+class _UpcomingRow:
+    date: str
+    venue: str
+    location: str
+    postcode: str
+    players_signed_up: str
+    players_at_last: str
+    travel_time: str
+    route_link: str
+    event_link: str
+    last_event_link: str
+    travel_seconds: int = field(default=None, repr=False, compare=False)
+
+
+def _extract_uk_postcode(address: str) -> str:
+    m = _UK_POSTCODE_RE.search(address or "")
+    return m.group(1).upper() if m else ""
+
+
+def _geocode_query(query: str, cache: dict):
+    """Geocode a query string via Nominatim. Returns (lat, lon) or None."""
+    if query in cache:
+        return cache[query]
+    import requests as _req
+
+    time.sleep(1.1)  # Nominatim rate limit: max 1 req/sec
+    try:
+        # Use the postalcode parameter for postcode-like queries (more reliable for UK)
+        if _UK_POSTCODE_ONLY_RE.match(query.strip()):
+            params = {"postalcode": query.strip(), "country": "gb", "format": "json", "limit": 1}
+        else:
+            params = {"q": query, "format": "json", "limit": 1, "countrycodes": "gb"}
+        r = _req.get(_NOMINATIM_API, params=params, headers=_NOMINATIM_HEADERS, timeout=10)
+        results = r.json()
+        if results:
+            coord = (float(results[0]["lat"]), float(results[0]["lon"]))
+            cache[query] = coord
+            return coord
+    except Exception:
+        pass
+    cache[query] = None
+    return None
+
+
+def _get_osrm_duration(origin, dest):
+    """Return driving duration in seconds via OSRM, or None on failure."""
+    import requests as _req
+
+    lat1, lon1 = origin
+    lat2, lon2 = dest
+    try:
+        r = _req.get(
+            f"{_OSRM_API}/{lon1},{lat1};{lon2},{lat2}",
+            params={"overview": "false"},
+            timeout=10,
+        )
+        data = r.json()
+        if data.get("code") == "Ok" and data.get("routes"):
+            return int(data["routes"][0]["duration"])
+    except Exception:
+        pass
+    return None
+
+
+def _format_travel_time(seconds: int) -> str:
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    return f"{h}h {m}m" if h else f"{m}m"
+
+
+def _parse_travel_seconds(s: str):
+    """Parse '1h 23m' or '45m' back to seconds for sorting. Returns None if unparseable."""
+    if not s or s == "N/A":
+        return None
+    hours = re.search(r"(\d+)h", s)
+    mins = re.search(r"(\d+)m", s)
+    total = (int(hours.group(1)) * 3600 if hours else 0) + (int(mins.group(1)) * 60 if mins else 0)
+    return total or None
+
+
+def _make_route_link(origin_postcode: str, dest: str) -> str:
+    o = urllib.parse.quote(origin_postcode)
+    d = urllib.parse.quote(dest or "")
+    return f"https://www.google.com/maps/dir/?api=1&origin={o}&destination={d}"
+
+
+def _load_travel_cache(csv_path: str) -> dict:
+    """Read an existing upcoming CSV and return {venue: (travel_time, route_link)}."""
+    cache: dict = {}
+    try:
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                if row.get("Venue"):
+                    cache[row["Venue"]] = (
+                        row.get("Travel time", ""),
+                        row.get("Route link", ""),
+                    )
+    except FileNotFoundError:
+        pass
+    return cache
+
+
+def _write_upcoming_csv(rows: list, csv_path: str) -> None:
+    """Write rows sorted by date then travel time, with blank rows between dates."""
+    rows.sort(
+        key=lambda r: (r.date, r.travel_seconds if r.travel_seconds is not None else 999_999)
+    )
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(_UPCOMING_CSV_HEADERS)
+        prev_date = None
+        for row in rows:
+            if prev_date is not None and row.date != prev_date:
+                writer.writerow([])
+            writer.writerow(
+                [
+                    row.date,
+                    row.venue,
+                    row.location,
+                    row.postcode,
+                    row.players_signed_up,
+                    row.players_at_last,
+                    row.travel_time,
+                    row.route_link,
+                    row.event_link,
+                    row.last_event_link,
+                ]
+            )
+            prev_date = row.date
+
+
+def _build_upcoming_rows(season_name: str, origin_postcode: str, csv_path: str, session) -> list:
+    today = _date.today().isoformat()
+
+    set_types_db = (
+        session.query(_db.SetChampionshipType)
+        .filter(_db.SetChampionshipType.display_name.ilike(f"%{season_name}%"))
+        .all()
+    )
+    if not set_types_db:
+        raise click.ClickException(f"No set championship type found matching {season_name!r}.")
+
+    type_uuids = [st.uuid for st in set_types_db]
+    labels = ", ".join(st.display_name for st in set_types_db)
+
+    upcoming_comps = (
+        session.query(_db.Competition)
+        .filter(
+            _db.Competition.set_championship_type_uuid.in_(type_uuids),
+            _db.Competition.start_date >= today,
+        )
+        .order_by(_db.Competition.start_date)
+        .all()
+    )
+
+    click.echo(f"  Loaded {len(upcoming_comps)} upcoming events from local DB ({labels}).")
+    if not upcoming_comps:
+        click.echo("  (Run import-set-championship to refresh.)")
+
+    travel_cache = _load_travel_cache(csv_path)
+    if travel_cache:
+        click.echo(f"  Loaded {len(travel_cache)} cached travel times from existing CSV.")
+
+    geo_cache: dict = {}
+    origin_coord = None
+    if origin_postcode:
+        click.echo(f"  Geocoding origin {origin_postcode!r}…")
+        origin_coord = _geocode_query(origin_postcode, geo_cache)
+        if origin_coord is None:
+            click.echo(f"  Warning: could not geocode {origin_postcode!r}.", err=True)
+
+    rows: list = []
+    for comp in upcoming_comps:
+        venue = comp.venue
+        venue_name = venue.name if venue else comp.name
+        address = (venue.address if venue else None) or ""
+        venue_postcode = _extract_uk_postcode(address)
+
+        # Players at last set champ at this venue (from DB)
+        last_attendance = "N/A"
+        last_event_ph_id = None
+        if venue:
+            last_comp = (
+                session.query(_db.Competition.attended_player_count, _db.Competition.ph_event_id)
+                .filter(
+                    _db.Competition.venue_uuid == venue.ph_uuid,
+                    _db.Competition.start_date < today,
+                    _db.Competition.is_complete,
+                )
+                .order_by(_db.Competition.start_date.desc())
+                .first()
+            )
+            if last_comp and last_comp[0]:
+                last_attendance = str(last_comp[0])
+                last_event_ph_id = last_comp[1]
+
+        # Travel time: reuse from existing CSV if available, else call geocoder + OSRM
+        travel_time = "N/A"
+        route_link = ""
+        travel_seconds = None
+
+        dest_str = address if address else f"{venue_name}, United Kingdom"
+        # Prefer postcode for geocoding — Nominatim handles UK postcodes reliably
+        # but fails on PlayHub's full address format (e.g. "5 High St, Cafe, Town, England, AB12CD, GB")
+        dest_for_geocode = venue_postcode if venue_postcode else dest_str
+
+        cached = travel_cache.get(venue_name)
+        if cached and cached[0] and cached[0] != "N/A":
+            # Reuse cached travel time but regenerate route link from current address
+            travel_time = cached[0]
+            travel_seconds = _parse_travel_seconds(travel_time)
+            if origin_postcode:
+                route_link = _make_route_link(origin_postcode, dest_str)
+        elif origin_coord:
+            dest_coord = _geocode_query(dest_for_geocode, geo_cache)
+            if dest_coord:
+                secs = _get_osrm_duration(origin_coord, dest_coord)
+                if secs is not None:
+                    travel_seconds = secs
+                    travel_time = _format_travel_time(secs)
+            if origin_postcode:
+                route_link = _make_route_link(origin_postcode, dest_str)
+
+        signed_up = str(comp.attended_player_count) if comp.attended_player_count is not None else "N/A"
+        ph_base = "https://tcg.ravensburgerplay.com/events"
+        event_link = f"{ph_base}/{comp.ph_event_id}" if comp.ph_event_id else ""
+        last_event_link = f"{ph_base}/{last_event_ph_id}" if last_event_ph_id else ""
+
+        rows.append(
+            _UpcomingRow(
+                date=comp.start_date,
+                venue=venue_name,
+                location=address,
+                postcode=venue_postcode,
+                players_signed_up=signed_up,
+                players_at_last=last_attendance,
+                travel_time=travel_time,
+                route_link=route_link,
+                event_link=event_link,
+                last_event_link=last_event_link,
+                travel_seconds=travel_seconds,
+            )
+        )
+
+    return rows
+
+
+@cli.command("upcoming-set-champs")
+@click.option("--name", "season_name", required=True, help="Season name filter (partial, case-insensitive).")
+@click.option("--postcode", default=None, help="Origin postcode for travel time calculation.")
+@click.option(
+    "--postcodes-file",
+    "postcodes_file",
+    default=None,
+    type=click.Path(exists=True),
+    help="Text file with one origin postcode per line. Generates one CSV per postcode.",
+)
+def upcoming_set_champs(season_name, postcode, postcodes_file):
+    """Generate a CSV of upcoming set championship events with travel times.
+
+    Writes docs/upcoming_<POSTCODE>.csv for each postcode. If the file already
+    exists, cached travel times are reused and only other data is refreshed.
+    """
+    if not postcode and not postcodes_file:
+        raise click.UsageError("Provide --postcode or --postcodes-file.")
+
+    postcodes: list = []
+    if postcodes_file:
+        with open(postcodes_file, encoding="utf-8") as fh:
+            postcodes.extend(line.strip() for line in fh if line.strip())
+    if postcode:
+        postcodes.append(postcode.strip())
+
+    if not postcodes:
+        raise click.ClickException("No postcodes found.")
+
+    docs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs")
+
+    engine = _db.init_db()
+    Session = _db.make_session_factory(engine)
+
+    with Session() as session:
+        for pc in postcodes:
+            filename = f"upcoming_{pc.replace(' ', '_').upper()}.csv"
+            csv_path = os.path.join(docs_dir, filename)
+            click.echo(f"\n[{pc}] → {filename}")
+            rows = _build_upcoming_rows(
+                season_name=season_name,
+                origin_postcode=pc,
+                csv_path=csv_path,
+                session=session,
+            )
+            _write_upcoming_csv(rows, csv_path)
+            click.echo(f"  Written {len(rows)} events.")
+
+
+# ---------------------------------------------------------------------------
+# Command: peek-decklists
+# ---------------------------------------------------------------------------
 
 @cli.command("peek-decklists")
 @click.argument("event_url")
