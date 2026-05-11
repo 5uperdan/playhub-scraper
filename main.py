@@ -2047,6 +2047,11 @@ def upcoming_set_champs(season_name, postcode, postcodes_file):
 
     with Session() as session:
         for pc in postcodes:
+            if not _UK_POSTCODE_ONLY_RE.match(pc.strip()):
+                raise click.UsageError(
+                    f"'{pc}' does not look like a full UK postcode (e.g. MK6 3LP). "
+                    "Provide the full postcode including the inward code."
+                )
             filename = f"upcoming_{pc.replace(' ', '_').upper()}.csv"
             csv_path = os.path.join(docs_dir, filename)
             click.echo(f"\n[{pc}] → {filename}")

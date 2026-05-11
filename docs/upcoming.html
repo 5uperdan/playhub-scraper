@@ -313,6 +313,11 @@
             color: #991b1b;
         }
 
+        .travel-very-slow {
+            color: #7f1d1d;
+            font-weight: 600;
+        }
+
         /* ── Loading state ── */
         #loading {
             display: none;
@@ -489,9 +494,10 @@
 
         function travelClass(str) {
             const s = travelToSeconds(str);
-            if (s <= 3600) return 'travel-fast';
-            if (s <= 7200) return 'travel-mid';
-            return 'travel-slow';
+            if (s < 1800) return 'travel-fast';       // under 30 min
+            if (s < 3600) return 'travel-mid';        // 30–60 min
+            if (s < 5400) return 'travel-slow';       // 60–90 min
+            return 'travel-very-slow';                // over 90 min
         }
 
         // ═══════════════════════════════════════════════════════════
@@ -694,14 +700,14 @@
 
         function showLoading() {
             document.getElementById('entry-screen').style.display = 'none';
-            document.getElementById('loading').style.display = '';
+            document.getElementById('loading').style.display = 'block';
             document.getElementById('results-screen').style.display = 'none';
         }
 
         function showResults() {
             document.getElementById('entry-screen').style.display = 'none';
             document.getElementById('loading').style.display = 'none';
-            document.getElementById('results-screen').style.display = '';
+            document.getElementById('results-screen').style.display = 'block';
         }
 
         function showEntryError(msg) {
