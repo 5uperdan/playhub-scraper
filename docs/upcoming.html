@@ -371,8 +371,8 @@
         </div>
 
         <form class="postcode-form" id="postcode-form">
-            <input type="text" id="postcode-input" placeholder="e.g. MK6 3LP" autocomplete="postal-code"
-                autocorrect="off" autocapitalize="characters" spellcheck="false">
+            <input type="text" id="postcode-input" placeholder="e.g. MK6" autocomplete="postal-code" autocorrect="off"
+                autocapitalize="characters" spellcheck="false">
             <button type="submit">Load</button>
         </form>
 
@@ -505,7 +505,7 @@
         }
 
         // ═══════════════════════════════════════════════════════════
-        //  CSV URL from postcode   e.g.  MK6 3LP  →  upcoming_MK6_3LP.csv
+        //  CSV URL from postcode   e.g.  MK6  →  upcoming_MK6.csv
         // ═══════════════════════════════════════════════════════════
         function csvFilename(postcode) {
             return 'upcoming_' + postcode.replace(/\s+/g, '_') + '.csv';
