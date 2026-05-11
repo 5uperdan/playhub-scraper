@@ -1732,5 +1732,104 @@ def export_anonymized(pattern, exclude, output, dry_run):
     click.echo(f"Anonymized {len(matched)} player(s) in {output!r}.")
 
 
+@cli.command("peek-decklists")
+@click.argument("event_url")
+def peek_decklists(event_url):
+    """Check whether decklists are available for an event and print the first one.
+
+    EVENT_URL is a PlayHub event URL, e.g.
+    https://tcg.ravensburgerplay.com/events/349881
+    """
+    event_id = _scrape.get_event_id_from_url(event_url)
+    if event_id is None:
+        raise click.BadParameter(f"Could not parse an event ID from: {event_url!r}")
+
+    import requests as _req
+
+    _DECK_BASE = "https://api.ravensburgerplay.com/api/v2"
+
+    def _deck_get(path, params=None):
+        r = _req.get(_DECK_BASE + path, headers=_scrape.HEADERS, params=params, timeout=15)
+        r.raise_for_status()
+        return r.json()
+
+    # Fetch event metadata
+    try:
+        ev = _scrape._get_raw(f"/events/{event_id}/")
+    except Exception as exc:
+        raise click.ClickException(f"Could not fetch event {event_id}: {exc}")
+
+    ev_name = ev.get("name", f"Event {event_id}")
+    settings = ev.get("settings") or {}
+    dl_status = settings.get("decklist_status", "UNKNOWN")
+    on_spicerack = settings.get("decklists_on_spicerack", False)
+    n = ev.get("starting_player_count", "?")
+
+    click.echo(f"Event:    {ev_name} (id={event_id})")
+    click.echo(f"Players:  {n}")
+    click.echo(f"Decklist status:    {dl_status}")
+    click.echo(f"Submitted via PlayHub: {on_spicerack}")
+    click.echo("")
+
+    if not on_spicerack:
+        click.echo("No decklists were submitted through PlayHub for this event.")
+        return
+
+    # Single pass: find first deck_id and count how many registrations have one
+    first_reg = None
+    deck_count = 0
+    total_regs = None
+    page = 1
+    while True:
+        data = _scrape._get_raw(f"/events/{event_id}/registrations/", {"page_size": 100, "page": page})
+        if total_regs is None:
+            total_regs = data.get("count", "?")
+        for reg in data.get("results", []):
+            if reg.get("deck_id"):
+                deck_count += 1
+                if first_reg is None:
+                    first_reg = reg
+        if not data.get("next_page_number"):
+            break
+        page = data["next_page_number"]
+
+    click.echo(f"Total registrations: {total_regs}")
+    click.echo(f"Registrations with decklist: {deck_count}")
+    click.echo("")
+
+    if first_reg is None:
+        click.echo("No deck_id present in any registration.")
+        return
+
+    # Fetch and print the first available decklist
+    player_name = first_reg.get("best_identifier") or first_reg.get("special_user_identifier") or "Unknown"
+    place = first_reg.get("final_place_in_standings")
+    user_id = (first_reg.get("user") or {}).get("id")
+    deck_id = first_reg["deck_id"]
+
+    click.echo(f"Sample decklist — {player_name} (user_id={user_id}, place={place}):")
+    click.echo(f"  Deck UUID: {deck_id}")
+
+    try:
+        deck = _deck_get(f"/deckbuilder/decks/{deck_id}/")
+    except Exception as exc:
+        click.echo(f"  Could not fetch deck: {exc}")
+        return
+
+    deck_name = deck.get("name", "Unnamed")
+    card_count = deck.get("card_count", "?")
+    click.echo(f"  Name:  {deck_name}")
+    click.echo(f"  Cards: {card_count}")
+    click.echo("")
+
+    for section in deck.get("sections", []):
+        click.echo(f"  {section.get('name', 'Section')}:")
+        for card in section.get("cards", []):
+            qty = card.get("quantity", 1)
+            card_data = card.get("card") or {}
+            card_name = card_data.get("name") or card.get("card_id", "?")
+            click.echo(f"    {qty}x {card_name}")
+
+
 if __name__ == "__main__":
     cli()

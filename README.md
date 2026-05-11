@@ -344,6 +344,39 @@ Use `--dry-run` to see exactly which players would be affected before writing an
 
 ---
 
+### `peek-decklists <event-url>`
+
+Checks whether decklists were submitted through PlayHub for an event, and prints the first available decklist as a sample.
+
+```bash
+uv run main.py peek-decklists "https://tcg.ravensburgerplay.com/events/349881"
+```
+
+Example output:
+```
+Event:    MEGA Illumineers Cup CCQ (id=349881)
+Players:  245
+Decklist status:    PUBLISHED
+Submitted via PlayHub: True
+
+Total registrations: 245
+Registrations with decklist: 228
+
+Sample decklist — DEGENS_Ronnie (user_id=25133, place=146):
+  Deck UUID: 06bd4466-1c67-4950-b4a9-4a00e268a329
+  Name:  Yella Purp
+  Cards: 60
+
+  Main Deck:
+    4x Cheshire Cat
+    4x Demona
+    ...
+```
+
+If no decklists were submitted (`decklists_on_spicerack=False`), the command exits early with a message. This is the case for most local UK events.
+
+---
+
 ### Database schema
 
 | Table | Key columns |
