@@ -57,6 +57,7 @@ class ApiEventListItem(BaseModel):
     model_config = _IGNORE_EXTRA
     id: int
     name: Optional[str] = None
+    start_datetime: Optional[str] = None
     store: Optional[ApiStore] = None
 
 
@@ -165,6 +166,8 @@ class RegistrationInfo(BaseModel):
 class UkEventInfo(BaseModel):
     event_id: int
     name: str
+    start_date: Optional[str] = None
+    store_name: Optional[str] = None
     set_championship_type_template: Optional[str] = None
 
 
@@ -297,6 +300,8 @@ def fetch_events_for_template(template_id: str, progress_callback=None) -> list[
                 UkEventInfo(
                     event_id=event.id,
                     name=event.name or f"Event {event.id}",
+                    start_date=(event.start_datetime or "").split("T")[0] or None,
+                    store_name=event.store.name if event.store else None,
                 )
             )
 
