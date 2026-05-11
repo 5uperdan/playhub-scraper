@@ -72,6 +72,10 @@ uv run main.py add-set-championship-type \
   --url "https://tcg.ravensburgerplay.com/events/440043" \
   --name "Winterspell"
 
+uv run main.py add-set-championship-type \
+  --url "https://tcg.ravensburgerplay.com/events/503021" \
+  --name "Wilds Unknown"
+
 # Import all UK events for all registered seasons
 uv run main.py import-set-championship
 
