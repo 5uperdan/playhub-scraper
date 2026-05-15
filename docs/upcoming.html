@@ -398,6 +398,7 @@
     <div id="results-screen">
         <div class="results-header">
             <h2 id="results-title"></h2>
+            <span id="last-updated" style="font-size:0.8rem;color:#94a3b8;white-space:nowrap"></span>
             <button id="change-postcode-btn">Change postcode</button>
         </div>
 
@@ -542,6 +543,7 @@
                             : `Failed to load data (HTTP ${resp.status})`
                     );
                 }
+                const lastModified = resp.headers.get('Last-Modified');
                 const text = await resp.text();
                 allRows = parseCSV(text);
                 if (!allRows.length) throw new Error('CSV file is empty.');
@@ -556,6 +558,13 @@
                 document.getElementById('venue-filter').value = '';
                 document.getElementById('results-title').textContent =
                     `Upcoming events — travelling from ${norm}`;
+                const updatedEl = document.getElementById('last-updated');
+                if (lastModified) {
+                    const d = new Date(lastModified);
+                    updatedEl.textContent = `Updated ${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+                } else {
+                    updatedEl.textContent = '';
+                }
                 showResults();
                 renderTable();
             } catch (err) {

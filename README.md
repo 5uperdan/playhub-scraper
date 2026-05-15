@@ -375,8 +375,8 @@ Columns: Date, Venue, Location, Postcode, Players signed up, Players at last set
 Events are sorted by date ascending, with a blank row between each day's events, and within each day by travel time ascending.
 
 ```bash
-# Single postcode (as much or little precision as you want)
-uv run main.py upcoming-set-champs --name "Wilds Unknown" --postcode "MK9"
+# Single postcode — must be a full UK postcode (e.g. MK9 3AE, not just MK9)
+uv run main.py upcoming-set-champs --name "Wilds Unknown" --postcode "MK9 3AE"
 
 # Multiple postcodes from a file (one per line) — writes one CSV per postcode
 uv run main.py upcoming-set-champs --name "Wilds Unknown" --postcodes-file postcodes.txt
@@ -385,7 +385,7 @@ uv run main.py upcoming-set-champs --name "Wilds Unknown" --postcodes-file postc
 Once the CSV is committed and pushed to `docs/`, you can view the results at:
 
 ```
-https://5uperdan.github.io/playhub-scraper/upcoming.html?postcode=MK9
+https://5uperdan.github.io/playhub-scraper/upcoming.html?postcode=MK9+3AE
 ```
 
 The [upcoming events page](https://5uperdan.github.io/playhub-scraper/upcoming.html) fetches the CSV directly from GitHub Pages. If you pass a postcode for which no CSV exists in `docs/`, the page will show an error with the exact command to run.
@@ -393,6 +393,84 @@ The [upcoming events page](https://5uperdan.github.io/playhub-scraper/upcoming.h
 Travel times are calculated using [OSRM](http://project-osrm.org/) (no API key required, no traffic model). Route links open Google Maps directions in your browser. Geocoding is via [Nominatim](https://nominatim.openstreetmap.org/) (OpenStreetMap).
 
 If a CSV already exists for a postcode, cached travel times are reused automatically — no geocoding or routing API calls are made for venues that already have a travel time. Only new venues (not previously in the file) will trigger routing lookups.
+
+#### Automating with `upcoming.sh`
+
+`upcoming.sh` is a shell script that automates the full update cycle — pulling the latest code, importing new events, regenerating all CSVs, and pushing the results back to GitHub. It is designed to run unattended on a Raspberry Pi or any always-on Linux machine.
+
+```bash
+# Make it executable once
+chmod +x upcoming.sh
+
+# Run manually to test
+./upcoming.sh
+```
+
+What it does, in order:
+
+1. Resets any local uncommitted changes (`git reset --hard HEAD`)
+2. Pulls the latest code (`git pull --rebase`)
+3. Imports new set championship events from the PlayHub API (`import-set-championship`)
+4. Regenerates all CSVs listed in `postcodes.txt` (`upcoming-set-champs --postcodes-file`)
+5. Stages only the CSV files (`git add docs/*.csv`)
+6. Commits and pushes if there are changes; exits cleanly if nothing changed
+
+Edit `postcodes.txt` to control which postcodes get a CSV generated. One full UK postcode per line.
+
+#### Scheduling with systemd (recommended for Raspberry Pi / Linux)
+
+Create a service unit that runs the script:
+
+```bash
+sudo nano /etc/systemd/system/csv-updater.service
+```
+
+```ini
+[Unit]
+Description=PlayHub CSV updater
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/YOUR_REPO
+ExecStart=/home/pi/YOUR_REPO/upcoming.sh
+StandardOutput=journal
+StandardError=journal
+```
+
+Then create a timer unit that controls when it fires:
+
+```bash
+sudo nano /etc/systemd/system/csv-updater.timer
+```
+
+```ini
+[Unit]
+Description=Run PlayHub CSV updater daily
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+`Persistent=true` means if the machine was off at 06:00 it will run as soon as it boots.
+
+Enable and start the timer:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now csv-updater.timer
+```
+
+Check the timer is scheduled and view logs:
+
+```bash
+systemctl status csv-updater.timer   # next trigger time
+journalctl -u csv-updater.service    # logs from past runs
+```
 
 ---
 
