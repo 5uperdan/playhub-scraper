@@ -2064,6 +2064,18 @@ def upcoming_set_champs(season_name, postcode, postcodes_file):
             _write_upcoming_csv(rows, csv_path)
             click.echo(f"  Written {len(rows)} events.")
 
+    # Write a manifest of all available postcode CSVs so the web page can
+    # populate a dropdown without needing server-side directory listing.
+    import json as _json
+    manifest = sorted(
+        pc.replace(' ', '_').upper()
+        for pc in postcodes
+    )
+    manifest_path = os.path.join(docs_dir, "postcodes.json")
+    with open(manifest_path, "w", encoding="utf-8") as fh:
+        _json.dump(manifest, fh)
+    click.echo(f"\nWritten {manifest_path}")
+
 
 # ---------------------------------------------------------------------------
 # Command: peek-decklists

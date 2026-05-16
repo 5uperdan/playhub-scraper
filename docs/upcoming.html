@@ -86,20 +86,20 @@
             max-width: 380px;
         }
 
-        .postcode-form input {
+        .postcode-form select {
             flex: 1;
             padding: 0.625rem 0.875rem;
             border: 1px solid #cbd5e1;
             border-radius: 6px;
             font: inherit;
             font-size: 1rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
+            background: #fff;
             outline: none;
             transition: border-color 0.15s;
+            cursor: pointer;
         }
 
-        .postcode-form input:focus {
+        .postcode-form select:focus {
             border-color: #2563eb;
         }
 
@@ -268,12 +268,15 @@
             background: #f8fafc;
         }
 
-        tbody tr.day-separator td {
-            border-bottom: 2px solid #e2e8f0;
-            padding-top: 0;
-            padding-bottom: 0;
-            height: 0.5rem;
-            background: #f8fafc;
+        .day-group {
+            margin-bottom: 1.75rem;
+        }
+
+        .day-heading {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 0.5rem;
         }
 
         .muted {
@@ -372,12 +375,13 @@
     <div id="entry-screen">
         <div class="hero">
             <h2>Find events near you</h2>
-            <p>Enter your postcode to load upcoming set championship events, sorted by travel time.</p>
+            <p>Choose your postcode to load upcoming set championship events, sorted by travel time.</p>
         </div>
 
         <form class="postcode-form" id="postcode-form">
-            <input type="text" id="postcode-input" placeholder="e.g. MK6" autocomplete="postal-code" autocorrect="off"
-                autocapitalize="characters" spellcheck="false">
+            <select id="postcode-select">
+                <option value="">Loading…</option>
+            </select>
             <button type="submit">Load</button>
         </form>
 
@@ -408,22 +412,7 @@
                 <span id="event-count" class="count-label"></span>
             </div>
 
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th data-col="date">Date</th>
-                            <th data-col="venue">Venue</th>
-                            <th data-col="location">Location</th>
-                            <th data-col="signed_up" class="numeric" style="text-align:right">Signed up</th>
-                            <th data-col="last_champ" class="numeric" style="text-align:right">Last set champ</th>
-                            <th data-col="travel">Travel time</th>
-                            <th>Links</th>
-                        </tr>
-                    </thead>
-                    <tbody id="events-tbody"></tbody>
-                </table>
-            </div>
+            <div id="days-container"></div>
         </div>
     </div>
 
@@ -523,7 +512,7 @@
         // ═══════════════════════════════════════════════════════════
         let allRows = [];
         let filterText = '';
-        let sortCol = null;  // null = use natural CSV order (date + travel asc)
+        let sortCol = null;  // null = natural CSV order (travel asc within day)
         let sortDir = 1;     // 1 = asc, -1 = desc
 
         // ═══════════════════════════════════════════════════════════
@@ -554,6 +543,7 @@
                 window.history.replaceState({}, '', url);
 
                 sortCol = null;
+                sortDir = 1;
                 filterText = '';
                 document.getElementById('venue-filter').value = '';
                 document.getElementById('results-title').textContent =
@@ -561,7 +551,7 @@
                 const updatedEl = document.getElementById('last-updated');
                 if (lastModified) {
                     const d = new Date(lastModified);
-                    updatedEl.textContent = `Updated ${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+                    updatedEl.textContent = `Updated ${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
                 } else {
                     updatedEl.textContent = '';
                 }
@@ -580,6 +570,84 @@
             return (str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
 
+        function formatDate(iso) {
+            if (!iso) return 'Unknown date';
+            const d = new Date(iso + 'T00:00:00');
+            return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        }
+
+        function renderRow(r) {
+            const travel = r['Travel time'] || 'N/A';
+            const tClass = travelClass(travel);
+            const routeLink = r['Route link'];
+            const eventLink = r['Event link'];
+            const lastChampLink = r['Last set champ link'];
+            const signedUp = r['Players signed up'];
+            const lastChamp = r['Players at last set champ'];
+            const postcode = r['Postcode'];
+
+            const links = [];
+            if (routeLink) links.push(`<a class="link-icon" href="${esc(routeLink)}" target="_blank" rel="noopener" title="Directions">🗺️</a>`);
+            if (eventLink) links.push(`<a class="link-icon" href="${esc(eventLink)}" target="_blank" rel="noopener" title="Event page">🔗</a>`);
+            if (lastChampLink) links.push(`<a class="link-icon" href="${esc(lastChampLink)}" target="_blank" rel="noopener" title="Last set champ">📋</a>`);
+
+            return `<tr>
+                <td style="font-weight:500">${esc(r['Venue']) || '—'}</td>
+                <td class="muted" style="font-size:0.82rem;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r['Location'])}">${esc(postcode) || esc(r['Location']) || '—'}</td>
+                <td class="numeric">${signedUp !== '' && signedUp !== 'N/A' ? esc(signedUp) : '<span class="badge-na">—</span>'}</td>
+                <td class="numeric">${lastChamp !== '' && lastChamp !== 'N/A' ? esc(lastChamp) : '<span class="badge-na">—</span>'}</td>
+                <td><span class="${tClass}">${esc(travel)}</span></td>
+                <td style="white-space:nowrap">${links.join(' ')}</td>
+            </tr>`;
+        }
+
+        const COLS = [
+            { key: 'venue', label: 'Venue' },
+            { key: 'location', label: 'Location' },
+            { key: 'signed_up', label: 'Signed up', numeric: true },
+            { key: 'last_champ', label: 'Last set champ', numeric: true },
+            { key: 'travel', label: 'Travel time' },
+            { key: 'links', label: 'Links', nosort: true },
+        ];
+
+        function buildTableHeader() {
+            const ths = COLS.map(c => {
+                const alignStyle = c.numeric ? ' style="text-align:right"' : '';
+                const cls = !c.nosort && sortCol === c.key
+                    ? ` class="${sortDir === 1 ? 'sort-asc' : 'sort-desc'}"`
+                    : '';
+                const dataCol = c.nosort ? '' : ` data-col="${c.key}"`;
+                return `<th${dataCol}${alignStyle}${cls}>${esc(c.label)}</th>`;
+            }).join('');
+            return `<thead><tr>${ths}</tr></thead>`;
+        }
+
+        function sortRows(rows) {
+            if (!sortCol) return rows;
+            return [...rows].sort((a, b) => {
+                let av, bv;
+                if (sortCol === 'travel') {
+                    av = travelToSeconds(a['Travel time']);
+                    bv = travelToSeconds(b['Travel time']);
+                } else if (sortCol === 'signed_up') {
+                    av = parseInt(a['Players signed up']) || 0;
+                    bv = parseInt(b['Players signed up']) || 0;
+                } else if (sortCol === 'last_champ') {
+                    av = parseInt(a['Players at last set champ']) || 0;
+                    bv = parseInt(b['Players at last set champ']) || 0;
+                } else if (sortCol === 'venue') {
+                    av = (a['Venue'] || '').toLowerCase();
+                    bv = (b['Venue'] || '').toLowerCase();
+                } else if (sortCol === 'location') {
+                    av = (a['Postcode'] || a['Location'] || '').toLowerCase();
+                    bv = (b['Postcode'] || b['Location'] || '').toLowerCase();
+                }
+                if (av < bv) return -sortDir;
+                if (av > bv) return sortDir;
+                return 0;
+            });
+        }
+
         function renderTable() {
             let rows = allRows;
 
@@ -592,103 +660,46 @@
                 );
             }
 
-            // Sort — if no sort col, use natural CSV order (already date+travel sorted)
-            if (sortCol) {
-                rows = [...rows].sort((a, b) => {
-                    let av, bv;
-                    if (sortCol === 'travel') {
-                        av = travelToSeconds(a['Travel time']);
-                        bv = travelToSeconds(b['Travel time']);
-                    } else if (sortCol === 'signed_up') {
-                        av = parseInt(a['Players signed up']) || 0;
-                        bv = parseInt(b['Players signed up']) || 0;
-                    } else if (sortCol === 'last_champ') {
-                        av = parseInt(a['Players at last set champ']) || 0;
-                        bv = parseInt(b['Players at last set champ']) || 0;
-                    } else if (sortCol === 'date') {
-                        av = a['Date'] || '';
-                        bv = b['Date'] || '';
-                    } else if (sortCol === 'venue') {
-                        av = (a['Venue'] || '').toLowerCase();
-                        bv = (b['Venue'] || '').toLowerCase();
-                    } else if (sortCol === 'location') {
-                        av = (a['Location'] || '').toLowerCase();
-                        bv = (b['Location'] || '').toLowerCase();
-                    }
-                    if (av < bv) return -1 * sortDir;
-                    if (av > bv) return 1 * sortDir;
-                    return 0;
-                });
-            }
-
-            const tbody = document.getElementById('events-tbody');
+            const container = document.getElementById('days-container');
             const countEl = document.getElementById('event-count');
             countEl.textContent = `${rows.length} event${rows.length !== 1 ? 's' : ''}`;
 
             if (!rows.length) {
-                tbody.innerHTML = `<tr><td colspan="7" style="padding:2rem;text-align:center;color:#94a3b8;font-style:italic">No events match your filter</td></tr>`;
+                container.innerHTML = `<p style="padding:2rem;text-align:center;color:#94a3b8;font-style:italic">No events match your filter</p>`;
                 return;
             }
 
-            // Group by date for day separators (only in natural sort mode)
-            const useSeparators = !sortCol;
-            let lastDate = null;
-            const html = [];
-
+            // Group rows by date, preserving CSV order
+            const groups = new Map();
             rows.forEach(r => {
                 const date = r['Date'] || '';
-                if (useSeparators && lastDate !== null && date !== lastDate) {
-                    html.push(`<tr class="day-separator"><td colspan="7"></td></tr>`);
-                }
-                lastDate = date;
-
-                const travel = r['Travel time'] || 'N/A';
-                const tClass = travelClass(travel);
-                const routeLink = r['Route link'];
-                const eventLink = r['Event link'];
-                const lastChampLink = r['Last set champ link'];
-                const signedUp = r['Players signed up'];
-                const lastChamp = r['Players at last set champ'];
-                const postcode = r['Postcode'];
-
-                const links = [];
-                if (routeLink) links.push(`<a class="link-icon" href="${esc(routeLink)}" target="_blank" rel="noopener" title="Directions">🗺️</a>`);
-                if (eventLink) links.push(`<a class="link-icon" href="${esc(eventLink)}" target="_blank" rel="noopener" title="Event page">🔗</a>`);
-                if (lastChampLink) links.push(`<a class="link-icon" href="${esc(lastChampLink)}" target="_blank" rel="noopener" title="Last set champ">📋</a>`);
-
-                html.push(`<tr>
-                    <td class="muted" style="white-space:nowrap">${esc(date) || '—'}</td>
-                    <td style="font-weight:500">${esc(r['Venue']) || '—'}</td>
-                    <td class="muted" style="font-size:0.82rem;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r['Location'])}">${esc(postcode) || esc(r['Location']) || '—'}</td>
-                    <td class="numeric">${signedUp !== '' && signedUp !== 'N/A' ? esc(signedUp) : '<span class="badge-na">—</span>'}</td>
-                    <td class="numeric">${lastChamp !== '' && lastChamp !== 'N/A' ? esc(lastChamp) : '<span class="badge-na">—</span>'}</td>
-                    <td><span class="${tClass}">${esc(travel)}</span></td>
-                    <td style="white-space:nowrap">${links.join(' ')}</td>
-                </tr>`);
+                if (!groups.has(date)) groups.set(date, []);
+                groups.get(date).push(r);
             });
 
-            tbody.innerHTML = html.join('');
-        }
+            const html = [];
+            for (const [date, dayRows] of groups) {
+                const sorted = sortRows(dayRows);
+                html.push(`<div class="day-group">
+                    <h3 class="day-heading">${esc(formatDate(date))}</h3>
+                    <div class="table-wrap">
+                        <table>${buildTableHeader()}<tbody>
+                            ${sorted.map(renderRow).join('')}
+                        </tbody></table>
+                    </div>
+                </div>`);
+            }
+            container.innerHTML = html.join('');
 
-        // ═══════════════════════════════════════════════════════════
-        //  Column sort
-        // ═══════════════════════════════════════════════════════════
-        document.querySelectorAll('thead th[data-col]').forEach(th => {
-            th.addEventListener('click', () => {
-                const col = th.dataset.col;
-                if (sortCol === col) {
-                    sortDir *= -1;
-                } else {
-                    sortCol = col;
-                    sortDir = 1;
-                }
-                document.querySelectorAll('thead th').forEach(h => {
-                    h.classList.remove('sort-asc', 'sort-desc');
+            // Attach sort listeners to all th[data-col] elements
+            container.querySelectorAll('thead th[data-col]').forEach(th => {
+                th.addEventListener('click', () => {
+                    const col = th.dataset.col;
+                    if (sortCol === col) { sortDir *= -1; } else { sortCol = col; sortDir = 1; }
+                    renderTable();
                 });
-                th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
-                renderTable();
             });
-        });
+        }
 
         // ═══════════════════════════════════════════════════════════
         //  Venue filter
@@ -730,26 +741,50 @@
         }
 
         // ═══════════════════════════════════════════════════════════
+        //  Manifest — populate the postcode dropdown
+        // ═══════════════════════════════════════════════════════════
+        async function loadManifest(preselectPostcode) {
+            const sel = document.getElementById('postcode-select');
+            try {
+                const resp = await fetch('postcodes.json');
+                if (!resp.ok) throw new Error();
+                const postcodes = await resp.json(); // array of strings like ["MK6_3LP", ...]
+                sel.innerHTML = postcodes.map(p => {
+                    const display = p.replace('_', ' ');
+                    return `<option value="${p}">${display}</option>`;
+                }).join('');
+                if (preselectPostcode) {
+                    // Match against both spaced and underscored forms
+                    const target = preselectPostcode.replace(/\s+/g, '_').toUpperCase();
+                    const match = [...sel.options].find(o => o.value === target);
+                    if (match) {
+                        sel.value = match.value;
+                        loadPostcode(match.value.replace('_', ' '));
+                        return;
+                    }
+                }
+            } catch {
+                sel.innerHTML = '<option value="">No postcodes available</option>';
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
         //  Form submission
         // ═══════════════════════════════════════════════════════════
         document.getElementById('postcode-form').addEventListener('submit', e => {
             e.preventDefault();
-            const val = document.getElementById('postcode-input').value.trim();
+            const val = document.getElementById('postcode-select').value;
             if (!val) return;
             clearEntryError();
-            loadPostcode(val);
+            loadPostcode(val.replace('_', ' '));
         });
 
         document.getElementById('change-postcode-btn').addEventListener('click', () => {
-            // Remove postcode from URL
             const url = new URL(window.location);
             url.searchParams.delete('postcode');
             window.history.replaceState({}, '', url);
-            document.getElementById('postcode-input').value = '';
             showEntry();
         });
-
-        document.getElementById('postcode-input').addEventListener('input', clearEntryError);
 
         // ═══════════════════════════════════════════════════════════
         //  URL parameter bootstrap — skip entry screen if ?postcode=
@@ -757,10 +792,7 @@
         (function init() {
             const params = new URLSearchParams(window.location.search);
             const pc = params.get('postcode');
-            if (pc) {
-                document.getElementById('postcode-input').value = pc;
-                loadPostcode(pc);
-            }
+            loadManifest(pc || null);
         })();
     </script>
 </body>
