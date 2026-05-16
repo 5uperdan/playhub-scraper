@@ -396,30 +396,36 @@ If a CSV already exists for a postcode, cached travel times are reused automatic
 
 #### Automating with `upcoming.sh`
 
-`upcoming.sh` is a shell script that automates the full update cycle — pulling the latest code, importing new events, regenerating all CSVs, and pushing the results back to GitHub. It is designed to run unattended on a Raspberry Pi or any always-on Linux machine.
+There are two scripts:
+
+- **`launch_upcoming.sh`** — the launcher. Does `git reset --hard` and `git pull --rebase`, then `exec`s `upcoming.sh`. The systemd service points here.
+- **`upcoming.sh`** — the main work script. Imports events, regenerates CSVs, commits and pushes. Can also be run directly for a one-off update without pulling first.
+
+The split matters because a shell reads the whole script before executing it. If `upcoming.sh` pointed the service directly, any update to the script would only take effect on the *next* run. By having `launch_upcoming.sh` pull and then `exec upcoming.sh`, the freshly-pulled version of `upcoming.sh` is what actually runs — `exec` replaces the current process entirely rather than forking a child.
 
 ```bash
-# Make it executable once
-chmod +x upcoming.sh
+# Make both scripts executable once
+chmod +x launch_upcoming.sh upcoming.sh
 
-# Run manually to test
+# Run manually to test (pulls first, then runs upcoming.sh)
+./launch_upcoming.sh
+
+# Or run upcoming.sh directly to skip the pull
 ./upcoming.sh
 ```
 
-What it does, in order:
+What `upcoming.sh` does, in order:
 
-1. Resets any local uncommitted changes (`git reset --hard HEAD`)
-2. Pulls the latest code (`git pull --rebase`)
-3. Imports new set championship events from the PlayHub API (`import-set-championship`)
-4. Regenerates all CSVs listed in `postcodes.txt` (`upcoming-set-champs --postcodes-file`)
-5. Stages only the CSV files (`git add docs/*.csv`)
-6. Commits and pushes if there are changes; exits cleanly if nothing changed
+1. Imports new set championship events from the PlayHub API (`import-set-championship`)
+2. Regenerates all CSVs listed in `postcodes.txt` (`upcoming-set-champs --postcodes-file`)
+3. Stages the CSV and manifest files (`git add docs/*.csv docs/postcodes.json`)
+4. Commits and pushes if there are changes; exits cleanly if nothing changed
 
 Edit `postcodes.txt` to control which postcodes get a CSV generated. One full UK postcode per line.
 
 #### Scheduling with systemd (recommended for Raspberry Pi / Linux)
 
-Create a service unit that runs the script:
+Create a service unit that runs `launch_upcoming.sh`:
 
 ```bash
 sudo nano /etc/systemd/system/csv-updater.service
@@ -432,8 +438,9 @@ Description=PlayHub CSV updater
 [Service]
 Type=oneshot
 User=pi
-WorkingDirectory=/home/pi/YOUR_REPO
-ExecStart=/home/pi/YOUR_REPO/upcoming.sh
+WorkingDirectory=/home/youruser/YOUR_REPO
+Environment="PATH=/home/youruser/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/bin"
+ExecStart=/bin/bash -lc '/home/pi/YOUR_REPO/launch_upcoming.sh'
 StandardOutput=journal
 StandardError=journal
 ```
@@ -446,17 +453,18 @@ sudo nano /etc/systemd/system/csv-updater.timer
 
 ```ini
 [Unit]
-Description=Run PlayHub CSV updater daily
+Description=Run Playhub scraper every 3 hours
 
 [Timer]
-OnCalendar=*-*-* 06:00:00
+OnBootSec=5min
+OnUnitActiveSec=3h
 Persistent=true
 
 [Install]
 WantedBy=timers.target
 ```
 
-`Persistent=true` means if the machine was off at 06:00 it will run as soon as it boots.
+`Persistent=true` means if the machine was off when it was supposed to run, it will run as soon as it boots.
 
 Enable and start the timer:
 
@@ -470,6 +478,13 @@ Check the timer is scheduled and view logs:
 ```bash
 systemctl status csv-updater.timer   # next trigger time
 journalctl -u csv-updater.service    # logs from past runs
+```
+
+After any changes are made to the service
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart csv-updater.service
 ```
 
 ---
