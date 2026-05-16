@@ -603,6 +603,23 @@
             { key: 'links', label: 'Links', nosort: true },
         ];
 
+        function buildStaticTableHeader() {
+            const colgroup = `<colgroup>
+                <col><!-- Venue: auto -->
+                <col style="width:12%">
+                <col style="width:9%">
+                <col style="width:11%">
+                <col style="width:8%">
+                <col style="width:10%">
+                <col style="width:8%">
+            </colgroup>`;
+            const ths = COLS.map(c => {
+                const alignStyle = c.numeric ? ' style="text-align:right"' : '';
+                return `<th${alignStyle} style="cursor:default;color:#94a3b8">${esc(c.label)}</th>`;
+            }).join('');
+            return colgroup + `<thead><tr>${ths}</tr></thead>`;
+        }
+
         function buildTableHeader() {
             const colgroup = `<colgroup>
                 <col><!-- Venue: auto -->
@@ -664,7 +681,7 @@
                 .sort((a, b) => new Date(b['Created']) - new Date(a['Created']));
             if (!recent.length) { section.style.display = 'none'; return; }
             container.innerHTML = `<div class="table-wrap">
-                <table>${buildTableHeader()}<tbody>${recent.map(renderRow).join('')}</tbody></table>
+                <table>${buildStaticTableHeader()}<tbody>${recent.map(renderRow).join('')}</tbody></table>
             </div>`;
             section.style.display = 'block';
         }
@@ -714,7 +731,7 @@
             container.innerHTML = html.join('');
 
             // Attach sort listeners to all th[data-col] elements
-            document.querySelectorAll('#days-container thead th[data-col], #recent-container thead th[data-col]').forEach(th => {
+            document.querySelectorAll('#days-container thead th[data-col]').forEach(th => {
                 th.addEventListener('click', () => {
                     const col = th.dataset.col;
                     if (sortCol === col) { sortDir *= -1; } else { sortCol = col; sortDir = 1; }
