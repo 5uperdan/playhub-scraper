@@ -6,7 +6,7 @@ A tool for collecting and exploring Disney Lorcana Set Championship results from
 
 ## Vibes
 
-This project was fully vibe coded by Claude with not a single line of code written by myself. Even most of the readme was created by Claude. What a guy, eh?
+This project was mostly vibe coded by Claude. Even most of the readme was created by Claude. What a guy, eh?
 
 ---
 
@@ -21,10 +21,10 @@ The [upcoming events page](https://5uperdan.github.io/playhub-scraper/upcoming.h
 You can also link directly to a specific postcode by adding a `?postcode=` URL parameter, which skips the entry screen entirely:
 
 ```
-https://5uperdan.github.io/playhub-scraper/upcoming.html?postcode=MK6
+https://5uperdan.github.io/playhub-scraper/upcoming.html?postcode=...
 ```
 
-The page loads data from a pre-generated CSV file (e.g. `upcoming_MK6.csv`) that lives in the `docs/` folder alongside the page. If no CSV exists for the postcode you enter, the page will tell you which CLI command to run to generate it. See [`upcoming-set-champs`](#upcoming-set-champs---name-season---postcode-postcode) for how to create these files.
+The page loads data from a pre-generated CSV file (e.g. `upcoming_MK10_0BA.csv`) that lives in the `docs/` folder alongside the page. If no CSV exists for the postcode you enter, the page will tell you which CLI command to run to generate it. See [`upcoming-set-champs`](#upcoming-set-champs---name-season---postcode-postcode) for how to create these files.
 
 ---
 

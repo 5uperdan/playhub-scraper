@@ -52,6 +52,7 @@ class ApiEvent(BaseModel):
     tournament_phases: list[ApiPhase] = []
     display_status: Optional[str] = None
     full_address: Optional[str] = None
+    cost_in_cents: Optional[int] = None
 
 
 class ApiEventListItem(BaseModel):

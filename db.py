@@ -1,7 +1,7 @@
 """SQLAlchemy models for the playhub-scraper database."""
 
 import uuid as _uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -10,6 +10,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     UniqueConstraint,
     create_engine,
@@ -105,6 +106,8 @@ class Competition(Base):
     venue_uuid = Column(String, ForeignKey("venues.ph_uuid"), nullable=False)
     start_date = Column(String, nullable=False)
     start_time = Column(String, nullable=True)  # ISO 8601 datetime from first round's earliest match created_at
+    created_utc = Column(DateTime(timezone=True), nullable=True, default=lambda: datetime.now(timezone.utc))
+    price = Column(Numeric(precision=10, scale=2), nullable=True)
     attended_player_count = Column(Integer, nullable=True)
     set_championship_type_uuid = Column(String, ForeignKey("set_championship_types.uuid"), nullable=True)
     is_complete = Column(Boolean, nullable=False, default=False)

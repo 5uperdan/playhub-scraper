@@ -163,6 +163,8 @@ def _process_event(session, event_id, set_type_uuid=None, replace=False):
     comp.name = comp_name
     comp.attended_player_count = player_count
     comp.is_complete = event.display_status == "complete"
+    if event.cost_in_cents is not None:
+        comp.price = event.cost_in_cents / 100
     if set_type_uuid and comp.set_championship_type_uuid is None:
         comp.set_championship_type_uuid = set_type_uuid
 
@@ -1760,6 +1762,8 @@ _UPCOMING_CSV_HEADERS = [
     "Route link",
     "Event link",
     "Last set champ link",
+    "Price",
+    "Created",
 ]
 
 
@@ -1775,6 +1779,8 @@ class _UpcomingRow:
     route_link: str
     event_link: str
     last_event_link: str
+    price: str = ""
+    created_utc: str = ""
     travel_seconds: int = field(default=None, repr=False, compare=False)
 
 
@@ -1890,6 +1896,8 @@ def _write_upcoming_csv(rows: list, csv_path: str) -> None:
                     row.route_link,
                     row.event_link,
                     row.last_event_link,
+                    row.price,
+                    row.created_utc,
                 ]
             )
             prev_date = row.date
@@ -1991,6 +1999,8 @@ def _build_upcoming_rows(season_name: str, origin_postcode: str, csv_path: str, 
         ph_base = "https://tcg.ravensburgerplay.com/events"
         event_link = f"{ph_base}/{comp.ph_event_id}" if comp.ph_event_id else ""
         last_event_link = f"{ph_base}/{last_event_ph_id}" if last_event_ph_id else ""
+        price = f"\u00a3{comp.price:.2f}" if comp.price is not None else ""
+        created_utc_str = comp.created_utc.isoformat() if comp.created_utc else ""
 
         rows.append(
             _UpcomingRow(
@@ -2004,6 +2014,8 @@ def _build_upcoming_rows(season_name: str, origin_postcode: str, csv_path: str, 
                 route_link=route_link,
                 event_link=event_link,
                 last_event_link=last_event_link,
+                price=price,
+                created_utc=created_utc_str,
                 travel_seconds=travel_seconds,
             )
         )

@@ -223,6 +223,8 @@
             width: 100%;
             border-collapse: collapse;
             font-size: 0.9rem;
+            table-layout: fixed;
+            min-width: 480px;
         }
 
         thead th {
@@ -235,7 +237,6 @@
             text-transform: uppercase;
             letter-spacing: 0.05em;
             border-bottom: 1px solid #e2e8f0;
-            white-space: nowrap;
             cursor: pointer;
             user-select: none;
         }
@@ -301,24 +302,6 @@
 
         td.numeric {
             text-align: right;
-        }
-
-        .travel-fast {
-            color: #166534;
-            font-weight: 600;
-        }
-
-        .travel-mid {
-            color: #92400e;
-        }
-
-        .travel-slow {
-            color: #991b1b;
-        }
-
-        .travel-very-slow {
-            color: #7f1d1d;
-            font-weight: 600;
         }
 
         /* ── Loading state ── */
@@ -412,6 +395,22 @@
                 <span id="event-count" class="count-label"></span>
             </div>
 
+            <div id="recent-section" style="display:none" class="day-group">
+                <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;flex-wrap:wrap">
+                    <h3 class="day-heading" style="margin:0">New competitions</h3>
+                    <span style="font-size:0.85rem;color:#64748b">&mdash; added in the last</span>
+                    <select id="new-days-select"
+                        style="padding:0.2rem 0.4rem;border:1px solid #cbd5e1;border-radius:4px;font:inherit;font-size:0.85rem;background:#fff;cursor:pointer">
+                        <option value="1" selected>1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                    </select>
+                    <span style="font-size:0.85rem;color:#64748b">day(s)</span>
+                </div>
+                <div id="recent-container"></div>
+            </div>
             <div id="days-container"></div>
         </div>
     </div>
@@ -479,15 +478,7 @@
             const m = str.match(/(\d+)m/);
             if (h) secs += parseInt(h[1]) * 3600;
             if (m) secs += parseInt(m[1]) * 60;
-            return secs || Infinity;
-        }
-
-        function travelClass(str) {
-            const s = travelToSeconds(str);
-            if (s < 1800) return 'travel-fast';       // under 30 min
-            if (s < 3600) return 'travel-mid';        // 30–60 min
-            if (s < 5400) return 'travel-slow';       // 60–90 min
-            return 'travel-very-slow';                // over 90 min
+            return (h || m) ? secs : Infinity;
         }
 
         // ═══════════════════════════════════════════════════════════
@@ -512,8 +503,8 @@
         // ═══════════════════════════════════════════════════════════
         let allRows = [];
         let filterText = '';
-        let sortCol = null;  // null = natural CSV order (travel asc within day)
-        let sortDir = 1;     // 1 = asc, -1 = desc
+        let sortCol = 'travel';
+        let sortDir = 1;
 
         // ═══════════════════════════════════════════════════════════
         //  Load CSV and render
@@ -542,7 +533,7 @@
                 url.searchParams.set('postcode', norm);
                 window.history.replaceState({}, '', url);
 
-                sortCol = null;
+                sortCol = 'travel';
                 sortDir = 1;
                 filterText = '';
                 document.getElementById('venue-filter').value = '';
@@ -578,13 +569,13 @@
 
         function renderRow(r) {
             const travel = r['Travel time'] || 'N/A';
-            const tClass = travelClass(travel);
             const routeLink = r['Route link'];
             const eventLink = r['Event link'];
             const lastChampLink = r['Last set champ link'];
             const signedUp = r['Players signed up'];
             const lastChamp = r['Players at last set champ'];
             const postcode = r['Postcode'];
+            const price = r['Price'];
 
             const links = [];
             if (routeLink) links.push(`<a class="link-icon" href="${esc(routeLink)}" target="_blank" rel="noopener" title="Directions">🗺️</a>`);
@@ -593,10 +584,11 @@
 
             return `<tr>
                 <td style="font-weight:500">${esc(r['Venue']) || '—'}</td>
-                <td class="muted" style="font-size:0.82rem;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r['Location'])}">${esc(postcode) || esc(r['Location']) || '—'}</td>
+                <td class="muted" style="font-size:0.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r['Location'])}">${esc(postcode) || esc(r['Location']) || '—'}</td>
                 <td class="numeric">${signedUp !== '' && signedUp !== 'N/A' ? esc(signedUp) : '<span class="badge-na">—</span>'}</td>
                 <td class="numeric">${lastChamp !== '' && lastChamp !== 'N/A' ? esc(lastChamp) : '<span class="badge-na">—</span>'}</td>
-                <td><span class="${tClass}">${esc(travel)}</span></td>
+                <td>${price ? esc(price) : '<span class="badge-na">—</span>'}</td>
+                <td>${esc(travel)}</td>
                 <td style="white-space:nowrap">${links.join(' ')}</td>
             </tr>`;
         }
@@ -606,11 +598,21 @@
             { key: 'location', label: 'Location' },
             { key: 'signed_up', label: 'Signed up', numeric: true },
             { key: 'last_champ', label: 'Last set champ', numeric: true },
+            { key: 'price', label: 'Price', nosort: true },
             { key: 'travel', label: 'Travel time' },
             { key: 'links', label: 'Links', nosort: true },
         ];
 
         function buildTableHeader() {
+            const colgroup = `<colgroup>
+                <col><!-- Venue: auto -->
+                <col style="width:12%">
+                <col style="width:9%">
+                <col style="width:11%">
+                <col style="width:8%">
+                <col style="width:10%">
+                <col style="width:8%">
+            </colgroup>`;
             const ths = COLS.map(c => {
                 const alignStyle = c.numeric ? ' style="text-align:right"' : '';
                 const cls = !c.nosort && sortCol === c.key
@@ -619,7 +621,7 @@
                 const dataCol = c.nosort ? '' : ` data-col="${c.key}"`;
                 return `<th${dataCol}${alignStyle}${cls}>${esc(c.label)}</th>`;
             }).join('');
-            return `<thead><tr>${ths}</tr></thead>`;
+            return colgroup + `<thead><tr>${ths}</tr></thead>`;
         }
 
         function sortRows(rows) {
@@ -648,7 +650,27 @@
             });
         }
 
+        // ═══════════════════════════════════════════════════════════
+        //  New competitions (filtered by days since Created)
+        // ═══════════════════════════════════════════════════════════
+        function renderRecentEvents(rows) {
+            const section = document.getElementById('recent-section');
+            const container = document.getElementById('recent-container');
+            const days = parseInt(document.getElementById('new-days-select').value) || 1;
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - days);
+            const recent = rows
+                .filter(r => r['Created'] && new Date(r['Created']) >= cutoff)
+                .sort((a, b) => new Date(b['Created']) - new Date(a['Created']));
+            if (!recent.length) { section.style.display = 'none'; return; }
+            container.innerHTML = `<div class="table-wrap">
+                <table>${buildTableHeader()}<tbody>${recent.map(renderRow).join('')}</tbody></table>
+            </div>`;
+            section.style.display = 'block';
+        }
+
         function renderTable() {
+            renderRecentEvents(allRows);
             let rows = allRows;
 
             // Filter
@@ -692,7 +714,7 @@
             container.innerHTML = html.join('');
 
             // Attach sort listeners to all th[data-col] elements
-            container.querySelectorAll('thead th[data-col]').forEach(th => {
+            document.querySelectorAll('#days-container thead th[data-col], #recent-container thead th[data-col]').forEach(th => {
                 th.addEventListener('click', () => {
                     const col = th.dataset.col;
                     if (sortCol === col) { sortDir *= -1; } else { sortCol = col; sortDir = 1; }
@@ -707,6 +729,10 @@
         document.getElementById('venue-filter').addEventListener('input', e => {
             filterText = e.target.value.trim();
             renderTable();
+        });
+
+        document.getElementById('new-days-select').addEventListener('change', () => {
+            renderRecentEvents(allRows);
         });
 
         // ═══════════════════════════════════════════════════════════
