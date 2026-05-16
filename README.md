@@ -404,7 +404,7 @@ There are two scripts:
 The split matters because a shell reads the whole script before executing it. If `upcoming.sh` pointed the service directly, any update to the script would only take effect on the *next* run. By having `launch_upcoming.sh` pull and then `exec upcoming.sh`, the freshly-pulled version of `upcoming.sh` is what actually runs — `exec` replaces the current process entirely rather than forking a child.
 
 ```bash
-# Make both scripts executable once
+# Make both scripts executable once (may not be required as git should be tracking)
 chmod +x launch_upcoming.sh upcoming.sh
 
 # Run manually to test (pulls first, then runs upcoming.sh)
