@@ -224,7 +224,7 @@
             border-collapse: collapse;
             font-size: 0.9rem;
             table-layout: fixed;
-            min-width: 480px;
+            min-width: 640px;
         }
 
         thead th {
@@ -363,6 +363,7 @@
             font-size: 0.85rem;
             color: #64748b;
             white-space: nowrap;
+            display: none;
         }
 
         .card-row {
@@ -431,6 +432,53 @@
 
         .sort-select:focus {
             border-color: #2563eb;
+        }
+
+        /* ── Cat fact ── */
+        .cat-fact-section {
+            margin-bottom: 1.75rem;
+            background: #f0f9ff;
+            border: 1px solid #bae6fd;
+            border-radius: 8px;
+            padding: 0.875rem 1rem;
+        }
+
+        .cat-fact-inner {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+        }
+
+        .cat-fact-emoji {
+            font-size: 1.1rem;
+            line-height: 1.6;
+            flex-shrink: 0;
+        }
+
+        #cat-fact-text {
+            flex: 1;
+            font-size: 0.875rem;
+            color: #0c4a6e;
+            line-height: 1.6;
+            margin: 0;
+        }
+
+        .cat-fact-btn {
+            flex-shrink: 0;
+            background: transparent;
+            border: 1px solid #7dd3fc;
+            border-radius: 6px;
+            color: #0369a1;
+            font: inherit;
+            font-size: 0.78rem;
+            padding: 0.2rem 0.6rem;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.15s;
+        }
+
+        .cat-fact-btn:hover {
+            background: #e0f2fe;
         }
 
         /* ── Mobile ── */
@@ -539,6 +587,15 @@
                 </div>
                 <div id="recent-container"></div>
             </div>
+
+            <div id="cat-fact-section" class="cat-fact-section" style="display:none">
+                <div class="cat-fact-inner">
+                    <span class="cat-fact-emoji">🐱</span>
+                    <p id="cat-fact-text"></p>
+                    <button id="cat-fact-btn" class="cat-fact-btn">New fact</button>
+                </div>
+            </div>
+
             <div id="days-container"></div>
         </div>
     </div>
@@ -651,7 +708,7 @@
         // ═══════════════════════════════════════════════════════════
         //  Load CSV and render
         // ═══════════════════════════════════════════════════════════
-        async function loadPostcode(postcode) {
+        async function loadEventData(postcode) {
             const norm = normalisePostcode(postcode);
             const filename = csvFilename(norm);
 
@@ -755,11 +812,11 @@
             return `<div class="card">
                 <div class="card-header">
                     <span class="card-venue">${esc(r['Venue']) || '—'}</span>
-                    <span class="card-travel">${esc(travel)}</span>
                 </div>
                 ${location ? `<div class="card-row"><span class="card-label">Location</span><span class="muted" style="font-size:0.82rem">${esc(location)}</span></div>` : ''}
+                <div class="card-row"><span class="card-label">Drive Time</span><span>${esc(travel)}</span></div>
                 <div class="card-row"><span class="card-label">Signed up</span><span>${naVal(signedUp)}</span></div>
-                <div class="card-row"><span class="card-label">Last set champ</span><span>${naVal(lastChamp)}</span></div>
+                <div class="card-row"><span class="card-label">Last Attendance</span><span>${naVal(lastChamp)}</span></div>
                 ${price ? `<div class="card-row"><span class="card-label">Price</span><span>${esc(price)}</span></div>` : ''}
                 ${links.length ? `<div class="card-links">${links.join(' ')}</div>` : ''}
             </div>`;
@@ -769,21 +826,21 @@
             { key: 'venue', label: 'Venue' },
             { key: 'location', label: 'Location' },
             { key: 'signed_up', label: 'Signed up', numeric: true },
-            { key: 'last_champ', label: 'Last set champ', numeric: true },
+            { key: 'last_champ', label: 'Last Attendance', numeric: true },
             { key: 'price', label: 'Price', nosort: true },
-            { key: 'travel', label: 'Travel time' },
+            { key: 'travel', label: 'Drive Time' },
             { key: 'links', label: 'Links', nosort: true },
         ];
 
         function buildStaticTableHeader() {
             const colgroup = `<colgroup>
                 <col><!-- Venue: auto -->
-                <col style="width:12%">
-                <col style="width:9%">
-                <col style="width:11%">
-                <col style="width:8%">
-                <col style="width:10%">
-                <col style="width:8%">
+                <col style="width:90px">
+                <col style="width:80px">
+                <col style="width:130px">
+                <col style="width:65px">
+                <col style="width:90px">
+                <col style="width:60px">
             </colgroup>`;
             const ths = COLS.map(c => {
                 const alignStyle = c.numeric ? ' style="text-align:right"' : '';
@@ -795,12 +852,12 @@
         function buildTableHeader() {
             const colgroup = `<colgroup>
                 <col><!-- Venue: auto -->
-                <col style="width:12%">
-                <col style="width:9%">
-                <col style="width:11%">
-                <col style="width:8%">
-                <col style="width:10%">
-                <col style="width:8%">
+                <col style="width:90px">
+                <col style="width:80px">
+                <col style="width:130px">
+                <col style="width:65px">
+                <col style="width:90px">
+                <col style="width:60px">
             </colgroup>`;
             const ths = COLS.map(c => {
                 const alignStyle = c.numeric ? ' style="text-align:right"' : '';
@@ -876,19 +933,19 @@
                     return `<div class="card">
                         <div class="card-header">
                             <span class="card-venue">${esc(r['Venue']) || '—'}</span>
-                            <span class="card-travel">${esc(travel)}</span>
                         </div>
                         <div class="card-row"><span class="card-label">Date</span><span style="font-size:0.82rem">${esc(formatDate(r['Date']))}</span></div>
                         ${location ? `<div class="card-row"><span class="card-label">Location</span><span class="muted" style="font-size:0.82rem">${esc(location)}</span></div>` : ''}
+                        <div class="card-row"><span class="card-label">Drive Time</span><span>${esc(travel)}</span></div>
                         <div class="card-row"><span class="card-label">Signed up</span><span>${naVal(signedUp)}</span></div>
-                        <div class="card-row"><span class="card-label">Last set champ</span><span>${naVal(lastChamp)}</span></div>
+                        <div class="card-row"><span class="card-label">Last Attendance</span><span>${naVal(lastChamp)}</span></div>
                         ${price ? `<div class="card-row"><span class="card-label">Price</span><span>${esc(price)}</span></div>` : ''}
                         ${links.length ? `<div class="card-links">${links.join(' ')}</div>` : ''}
                     </div>`;
                 }).join('');
                 container.innerHTML = `<div class="cards-grid">${cards}</div>`;
             } else {
-                const dateColgroup = `<colgroup><col style="width:14%"><col><col style="width:12%"><col style="width:9%"><col style="width:11%"><col style="width:8%"><col style="width:10%"><col style="width:8%"></colgroup>`;
+                const dateColgroup = `<colgroup><col style="width:80px"><col><col style="width:90px"><col style="width:80px"><col style="width:130px"><col style="width:65px"><col style="width:90px"><col style="width:60px"></colgroup>`;
                 const dateThs = ['Date', ...COLS.map(c => c.label)].map((lbl, i) => {
                     const align = (i === 3 || i === 4) ? ' style="text-align:right;cursor:default;color:#94a3b8"' : ' style="cursor:default;color:#94a3b8"';
                     return `<th${align}>${esc(lbl)}</th>`;
@@ -917,7 +974,7 @@
                         <td style="white-space:nowrap">${links.join(' ')}</td>
                     </tr>`;
                 }).join('');
-                container.innerHTML = `<div class="table-wrap"><table style="min-width:560px">${dateColgroup}<thead><tr>${dateThs}</tr></thead><tbody>${dateRows}</tbody></table></div>`;
+                container.innerHTML = `<div class="table-wrap"><table style="min-width:720px">${dateColgroup}<thead><tr>${dateThs}</tr></thead><tbody>${dateRows}</tbody></table></div>`;
             }
             section.style.display = 'block';
         }
@@ -975,6 +1032,36 @@
         }
 
         // ═══════════════════════════════════════════════════════════
+        //  Cat fact
+        // ═══════════════════════════════════════════════════════════
+        async function loadCatFact(force = false) {
+            const prefs = loadPrefs();
+            const now = Date.now();
+            if (!force && prefs.catFact && prefs.catFactExpiry && now < prefs.catFactExpiry) {
+                renderCatFact(prefs.catFact);
+                return;
+            }
+            document.getElementById('cat-fact-text').textContent = 'Fetching a cat fact…';
+            document.getElementById('cat-fact-section').style.display = '';
+            try {
+                const resp = await fetch('https://catfact.ninja/fact');
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                savePrefs({ catFact: data.fact, catFactExpiry: now + 60 * 60 * 1000 });
+                renderCatFact(data.fact);
+            } catch {
+                const fallback = loadPrefs().catFact;
+                document.getElementById('cat-fact-text').textContent =
+                    fallback || 'Could not load a cat fact right now.';
+            }
+        }
+
+        function renderCatFact(fact) {
+            document.getElementById('cat-fact-text').textContent = fact;
+            document.getElementById('cat-fact-section').style.display = '';
+        }
+
+        // ═══════════════════════════════════════════════════════════
         //  Venue filter
         // ═══════════════════════════════════════════════════════════
         document.getElementById('venue-filter').addEventListener('input', e => {
@@ -1005,6 +1092,7 @@
 
         document.getElementById('btn-table-view').addEventListener('click', () => setView('table'));
         document.getElementById('btn-card-view').addEventListener('click', () => setView('card'));
+        document.getElementById('cat-fact-btn').addEventListener('click', () => loadCatFact(true));
 
         // ═══════════════════════════════════════════════════════════
         //  Screen transitions
@@ -1056,7 +1144,7 @@
                     const match = [...sel.options].find(o => o.value === target);
                     if (match) {
                         sel.value = match.value;
-                        loadPostcode(match.value.replace('_', ' '));
+                        loadEventData(match.value.replace('_', ' '));
                         return;
                     }
                 }
@@ -1073,7 +1161,7 @@
             const val = document.getElementById('postcode-select').value;
             if (!val) return;
             clearEntryError();
-            loadPostcode(val.replace('_', ' '));
+            loadEventData(val.replace('_', ' '));
         });
 
         document.getElementById('change-postcode-btn').addEventListener('click', () => {
@@ -1105,6 +1193,7 @@
             document.getElementById('new-days-select').value = prefs.days || '1';
 
             loadManifest(pc || null);
+            loadCatFact();
         })();
     </script>
 </body>
