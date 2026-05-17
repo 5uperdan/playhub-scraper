@@ -328,6 +328,111 @@
             }
         }
 
+        /* ── Card view ── */
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 0.75rem;
+        }
+
+        .card {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 0.5rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .card-venue {
+            font-weight: 600;
+            font-size: 0.95rem;
+            flex: 1;
+        }
+
+        .card-travel {
+            font-size: 0.85rem;
+            color: #64748b;
+            white-space: nowrap;
+        }
+
+        .card-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.875rem;
+            gap: 0.5rem;
+        }
+
+        .card-label {
+            color: #94a3b8;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            white-space: nowrap;
+        }
+
+        .card-links {
+            margin-top: 0.4rem;
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        /* ── View toggle ── */
+        .view-toggle {
+            display: flex;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .toggle-btn {
+            background: transparent;
+            border: none;
+            padding: 0.4rem 0.75rem;
+            font: inherit;
+            font-size: 0.85rem;
+            cursor: pointer;
+            color: #64748b;
+            transition: background 0.15s, color 0.15s;
+            white-space: nowrap;
+        }
+
+        .toggle-btn.active {
+            background: #1e293b;
+            color: #fff;
+        }
+
+        .toggle-btn:not(.active):hover {
+            background: #f1f5f9;
+            color: #1e293b;
+        }
+
+        /* ── Sort select ── */
+        .sort-select {
+            padding: 0.4rem 0.5rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            font: inherit;
+            font-size: 0.85rem;
+            background: #fff;
+            cursor: pointer;
+            outline: none;
+        }
+
+        .sort-select:focus {
+            border-color: #2563eb;
+        }
+
         /* ── Mobile ── */
         @media (max-width: 640px) {
             header {
@@ -340,6 +445,7 @@
 
             .controls input[type="text"] {
                 max-width: none;
+                min-width: 0;
             }
         }
     </style>
@@ -392,10 +498,21 @@
         <div class="content-wrap">
             <div class="controls">
                 <input type="text" id="venue-filter" placeholder="Filter by venue or location…" autocomplete="off">
+                <select id="sort-select" class="sort-select">
+                    <option value="travel:1">Travel (nearest first)</option>
+                    <option value="travel:-1">Travel (farthest first)</option>
+                    <option value="venue:1">Venue A→Z</option>
+                    <option value="signed_up:-1">Signed up (most first)</option>
+                    <option value="last_champ:-1">Previous attendance (most first)</option>
+                </select>
+                <div class="view-toggle">
+                    <button id="btn-table-view" class="toggle-btn">Table</button>
+                    <button id="btn-card-view" class="toggle-btn">Cards</button>
+                </div>
                 <span id="event-count" class="count-label"></span>
             </div>
 
-            <div id="recent-section" style="display:none" class="day-group">
+            <div id="recent-section" class="day-group">
                 <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;flex-wrap:wrap">
                     <h3 class="day-heading" style="margin:0">New competitions</h3>
                     <span style="font-size:0.85rem;color:#64748b">&mdash; added in the last</span>
@@ -406,6 +523,7 @@
                         <option value="3">3</option>
                         <option value="4">4</option>
                         <option value="5">5</option>
+                        <option value="7">7</option>
                     </select>
                     <span style="font-size:0.85rem;color:#64748b">day(s)</span>
                 </div>
@@ -505,6 +623,20 @@
         let filterText = '';
         let sortCol = 'travel';
         let sortDir = 1;
+        let viewMode = 'table'; // 'table' or 'card'
+
+        // ═══════════════════════════════════════════════════════════
+        //  Preferences (localStorage)
+        // ═══════════════════════════════════════════════════════════
+        const PREFS_KEY = 'playhub-upcoming-prefs';
+        function loadPrefs() {
+            try { return JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'); } catch { return {}; }
+        }
+        function savePrefs(updates) {
+            const p = loadPrefs();
+            Object.assign(p, updates);
+            localStorage.setItem(PREFS_KEY, JSON.stringify(p));
+        }
 
         // ═══════════════════════════════════════════════════════════
         //  Load CSV and render
@@ -533,8 +665,7 @@
                 url.searchParams.set('postcode', norm);
                 window.history.replaceState({}, '', url);
 
-                sortCol = 'travel';
-                sortDir = 1;
+                // keep sort preference; don't reset on postcode change
                 filterText = '';
                 document.getElementById('venue-filter').value = '';
                 document.getElementById('results-title').textContent =
@@ -542,7 +673,7 @@
                 const updatedEl = document.getElementById('last-updated');
                 if (lastModified) {
                     const d = new Date(lastModified);
-                    updatedEl.textContent = `Updated ${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+                    updatedEl.textContent = `Last change at ${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
                 } else {
                     updatedEl.textContent = '';
                 }
@@ -593,6 +724,37 @@
             </tr>`;
         }
 
+        function renderCard(r) {
+            const travel = r['Travel time'] || 'N/A';
+            const routeLink = r['Route link'];
+            const eventLink = r['Event link'];
+            const lastChampLink = r['Last set champ link'];
+            const signedUp = r['Players signed up'];
+            const lastChamp = r['Players at last set champ'];
+            const postcode = r['Postcode'];
+            const price = r['Price'];
+            const location = postcode || r['Location'] || '';
+
+            const links = [];
+            if (routeLink) links.push(`<a class="link-icon" href="${esc(routeLink)}" target="_blank" rel="noopener" title="Directions">🗺️</a>`);
+            if (eventLink) links.push(`<a class="link-icon" href="${esc(eventLink)}" target="_blank" rel="noopener" title="Event page">🔗</a>`);
+            if (lastChampLink) links.push(`<a class="link-icon" href="${esc(lastChampLink)}" target="_blank" rel="noopener" title="Last set champ">📋</a>`);
+
+            const naVal = v => (v && v !== 'N/A') ? esc(v) : '<span class="badge-na">—</span>';
+
+            return `<div class="card">
+                <div class="card-header">
+                    <span class="card-venue">${esc(r['Venue']) || '—'}</span>
+                    <span class="card-travel">${esc(travel)}</span>
+                </div>
+                ${location ? `<div class="card-row"><span class="card-label">Location</span><span class="muted" style="font-size:0.82rem">${esc(location)}</span></div>` : ''}
+                <div class="card-row"><span class="card-label">Signed up</span><span>${naVal(signedUp)}</span></div>
+                <div class="card-row"><span class="card-label">Last set champ</span><span>${naVal(lastChamp)}</span></div>
+                ${price ? `<div class="card-row"><span class="card-label">Price</span><span>${esc(price)}</span></div>` : ''}
+                ${links.length ? `<div class="card-links">${links.join(' ')}</div>` : ''}
+            </div>`;
+        }
+
         const COLS = [
             { key: 'venue', label: 'Venue' },
             { key: 'location', label: 'Location' },
@@ -635,8 +797,7 @@
                 const cls = !c.nosort && sortCol === c.key
                     ? ` class="${sortDir === 1 ? 'sort-asc' : 'sort-desc'}"`
                     : '';
-                const dataCol = c.nosort ? '' : ` data-col="${c.key}"`;
-                return `<th${dataCol}${alignStyle}${cls}>${esc(c.label)}</th>`;
+                return `<th${alignStyle}${cls} style="cursor:default">${esc(c.label)}</th>`;
             }).join('');
             return colgroup + `<thead><tr>${ths}</tr></thead>`;
         }
@@ -673,16 +834,81 @@
         function renderRecentEvents(rows) {
             const section = document.getElementById('recent-section');
             const container = document.getElementById('recent-container');
+            // Only show the section at all if the CSV has Created data
+            const hasCreated = rows.some(r => r['Created']);
+            if (!hasCreated) { section.style.display = 'none'; return; }
+            section.style.display = 'block';
             const days = parseInt(document.getElementById('new-days-select').value) || 1;
-            const cutoff = new Date();
-            cutoff.setDate(cutoff.getDate() - days);
+            const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
             const recent = rows
                 .filter(r => r['Created'] && new Date(r['Created']) >= cutoff)
                 .sort((a, b) => new Date(b['Created']) - new Date(a['Created']));
-            if (!recent.length) { section.style.display = 'none'; return; }
-            container.innerHTML = `<div class="table-wrap">
-                <table>${buildStaticTableHeader()}<tbody>${recent.map(renderRow).join('')}</tbody></table>
-            </div>`;
+            if (!recent.length) {
+                container.innerHTML = `<p style="padding:1rem 0;color:#94a3b8;font-style:italic">No competitions added in the last ${days} day(s).</p>`;
+                return;
+            }
+            if (viewMode === 'card') {
+                const cards = recent.map(r => {
+                    const travel = r['Travel time'] || 'N/A';
+                    const routeLink = r['Route link'];
+                    const eventLink = r['Event link'];
+                    const lastChampLink = r['Last set champ link'];
+                    const signedUp = r['Players signed up'];
+                    const lastChamp = r['Players at last set champ'];
+                    const postcode = r['Postcode'];
+                    const price = r['Price'];
+                    const location = postcode || r['Location'] || '';
+                    const links = [];
+                    if (routeLink) links.push(`<a class="link-icon" href="${esc(routeLink)}" target="_blank" rel="noopener" title="Directions">🗺️</a>`);
+                    if (eventLink) links.push(`<a class="link-icon" href="${esc(eventLink)}" target="_blank" rel="noopener" title="Event page">🔗</a>`);
+                    if (lastChampLink) links.push(`<a class="link-icon" href="${esc(lastChampLink)}" target="_blank" rel="noopener" title="Last set champ">📋</a>`);
+                    const naVal = v => (v && v !== 'N/A') ? esc(v) : '<span class="badge-na">—</span>';
+                    return `<div class="card">
+                        <div class="card-header">
+                            <span class="card-venue">${esc(r['Venue']) || '—'}</span>
+                            <span class="card-travel">${esc(travel)}</span>
+                        </div>
+                        <div class="card-row"><span class="card-label">Date</span><span style="font-size:0.82rem">${esc(formatDate(r['Date']))}</span></div>
+                        ${location ? `<div class="card-row"><span class="card-label">Location</span><span class="muted" style="font-size:0.82rem">${esc(location)}</span></div>` : ''}
+                        <div class="card-row"><span class="card-label">Signed up</span><span>${naVal(signedUp)}</span></div>
+                        <div class="card-row"><span class="card-label">Last set champ</span><span>${naVal(lastChamp)}</span></div>
+                        ${price ? `<div class="card-row"><span class="card-label">Price</span><span>${esc(price)}</span></div>` : ''}
+                        ${links.length ? `<div class="card-links">${links.join(' ')}</div>` : ''}
+                    </div>`;
+                }).join('');
+                container.innerHTML = `<div class="cards-grid">${cards}</div>`;
+            } else {
+                const dateColgroup = `<colgroup><col style="width:14%"><col><col style="width:12%"><col style="width:9%"><col style="width:11%"><col style="width:8%"><col style="width:10%"><col style="width:8%"></colgroup>`;
+                const dateThs = ['Date', ...COLS.map(c => c.label)].map((lbl, i) => {
+                    const align = (i === 3 || i === 4) ? ' style="text-align:right;cursor:default;color:#94a3b8"' : ' style="cursor:default;color:#94a3b8"';
+                    return `<th${align}>${esc(lbl)}</th>`;
+                }).join('');
+                const dateRows = recent.map(r => {
+                    const travel = r['Travel time'] || 'N/A';
+                    const routeLink = r['Route link'];
+                    const eventLink = r['Event link'];
+                    const lastChampLink = r['Last set champ link'];
+                    const signedUp = r['Players signed up'];
+                    const lastChamp = r['Players at last set champ'];
+                    const postcode = r['Postcode'];
+                    const price = r['Price'];
+                    const links = [];
+                    if (routeLink) links.push(`<a class="link-icon" href="${esc(routeLink)}" target="_blank" rel="noopener" title="Directions">🗺️</a>`);
+                    if (eventLink) links.push(`<a class="link-icon" href="${esc(eventLink)}" target="_blank" rel="noopener" title="Event page">🔗</a>`);
+                    if (lastChampLink) links.push(`<a class="link-icon" href="${esc(lastChampLink)}" target="_blank" rel="noopener" title="Last set champ">📋</a>`);
+                    return `<tr>
+                        <td class="muted" style="font-size:0.82rem;white-space:nowrap">${esc(r['Date'])}</td>
+                        <td style="font-weight:500">${esc(r['Venue']) || '—'}</td>
+                        <td class="muted" style="font-size:0.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r['Location'])}">${esc(postcode) || esc(r['Location']) || '—'}</td>
+                        <td class="numeric">${signedUp !== '' && signedUp !== 'N/A' ? esc(signedUp) : '<span class="badge-na">—</span>'}</td>
+                        <td class="numeric">${lastChamp !== '' && lastChamp !== 'N/A' ? esc(lastChamp) : '<span class="badge-na">—</span>'}</td>
+                        <td>${price ? esc(price) : '<span class="badge-na">—</span>'}</td>
+                        <td>${esc(travel)}</td>
+                        <td style="white-space:nowrap">${links.join(' ')}</td>
+                    </tr>`;
+                }).join('');
+                container.innerHTML = `<div class="table-wrap"><table style="min-width:560px">${dateColgroup}<thead><tr>${dateThs}</tr></thead><tbody>${dateRows}</tbody></table></div>`;
+            }
             section.style.display = 'block';
         }
 
@@ -719,25 +945,23 @@
             const html = [];
             for (const [date, dayRows] of groups) {
                 const sorted = sortRows(dayRows);
-                html.push(`<div class="day-group">
-                    <h3 class="day-heading">${esc(formatDate(date))}</h3>
-                    <div class="table-wrap">
-                        <table>${buildTableHeader()}<tbody>
-                            ${sorted.map(renderRow).join('')}
-                        </tbody></table>
-                    </div>
-                </div>`);
+                if (viewMode === 'card') {
+                    html.push(`<div class="day-group">
+                        <h3 class="day-heading">${esc(formatDate(date))}</h3>
+                        <div class="cards-grid">${sorted.map(renderCard).join('')}</div>
+                    </div>`);
+                } else {
+                    html.push(`<div class="day-group">
+                        <h3 class="day-heading">${esc(formatDate(date))}</h3>
+                        <div class="table-wrap">
+                            <table>${buildTableHeader()}<tbody>
+                                ${sorted.map(renderRow).join('')}
+                            </tbody></table>
+                        </div>
+                    </div>`);
+                }
             }
             container.innerHTML = html.join('');
-
-            // Attach sort listeners to all th[data-col] elements
-            document.querySelectorAll('#days-container thead th[data-col]').forEach(th => {
-                th.addEventListener('click', () => {
-                    const col = th.dataset.col;
-                    if (sortCol === col) { sortDir *= -1; } else { sortCol = col; sortDir = 1; }
-                    renderTable();
-                });
-            });
         }
 
         // ═══════════════════════════════════════════════════════════
@@ -748,9 +972,29 @@
             renderTable();
         });
 
-        document.getElementById('new-days-select').addEventListener('change', () => {
+        document.getElementById('sort-select').addEventListener('change', e => {
+            const parts = e.target.value.split(':');
+            sortCol = parts[0];
+            sortDir = parseInt(parts[1]);
+            savePrefs({ sort: e.target.value });
+            renderTable();
+        });
+
+        document.getElementById('new-days-select').addEventListener('change', e => {
+            savePrefs({ days: e.target.value });
             renderRecentEvents(allRows);
         });
+
+        function setView(mode) {
+            viewMode = mode;
+            savePrefs({ view: mode });
+            document.getElementById('btn-table-view').classList.toggle('active', mode === 'table');
+            document.getElementById('btn-card-view').classList.toggle('active', mode === 'card');
+            if (allRows.length) renderTable();
+        }
+
+        document.getElementById('btn-table-view').addEventListener('click', () => setView('table'));
+        document.getElementById('btn-card-view').addEventListener('click', () => setView('card'));
 
         // ═══════════════════════════════════════════════════════════
         //  Screen transitions
@@ -835,6 +1079,21 @@
         (function init() {
             const params = new URLSearchParams(window.location.search);
             const pc = params.get('postcode');
+            const prefs = loadPrefs();
+
+            // View: stored pref → device detection fallback
+            const defaultView = window.innerWidth <= 1024 ? 'card' : 'table';
+            setView(prefs.view || defaultView);
+
+            // Sort: stored pref → default 'travel:1'
+            const sortVal = prefs.sort || 'travel:1';
+            document.getElementById('sort-select').value = sortVal;
+            const [col, dir] = sortVal.split(':');
+            sortCol = col; sortDir = parseInt(dir);
+
+            // Days: stored pref → default '2'
+            document.getElementById('new-days-select').value = prefs.days || '2';
+
             loadManifest(pc || null);
         })();
     </script>
