@@ -439,6 +439,16 @@
                 padding: 0 0.75rem;
             }
 
+            .results-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.4rem;
+            }
+
+            .results-header h2 {
+                flex: none;
+            }
+
             .content-wrap {
                 padding: 0.875rem 0.75rem;
             }
@@ -491,7 +501,7 @@
     <div id="results-screen">
         <div class="results-header">
             <h2 id="results-title"></h2>
-            <span id="last-updated" style="font-size:0.8rem;color:#94a3b8;white-space:nowrap"></span>
+            <span id="last-updated" style="font-size:0.8rem;color:#94a3b8"></span>
             <button id="change-postcode-btn">Change postcode</button>
         </div>
 
@@ -1082,7 +1092,7 @@
             const prefs = loadPrefs();
 
             // View: stored pref → device detection fallback
-            const defaultView = window.innerWidth <= 1024 ? 'card' : 'table';
+            const defaultView = window.matchMedia('(max-width: 1024px)').matches ? 'card' : 'table';
             setView(prefs.view || defaultView);
 
             // Sort: stored pref → default 'travel:1'
@@ -1091,8 +1101,8 @@
             const [col, dir] = sortVal.split(':');
             sortCol = col; sortDir = parseInt(dir);
 
-            // Days: stored pref → default '2'
-            document.getElementById('new-days-select').value = prefs.days || '2';
+            // Days: stored pref → default '1'
+            document.getElementById('new-days-select').value = prefs.days || '1';
 
             loadManifest(pc || null);
         })();
